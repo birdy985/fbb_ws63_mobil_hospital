@@ -44,3 +44,8 @@ menu "Test"
     osource "test/Kconfig"
 endmenu
 
+menu "Open Source"
+    comment "Config the open source components."
+    osource "open_source/Kconfig"
+endmenu
+

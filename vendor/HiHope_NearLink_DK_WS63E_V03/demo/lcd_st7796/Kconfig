@@ -6,7 +6,7 @@ config SAMPLE_SUPPORT_ST7796
     bool
     prompt "Support ST7796."
     default y
-    depends on SAMPLE_SUPPORT_LCD
+    depends on SAMPLE_SUPPORT_LCD && OPEN_SOURCE_LVGL && SPI_SUPPORT_MASTER && SPI_SUPPORT_DMA
     help
         This option means support ST7796 IPS SPI LCD Sample.
 
