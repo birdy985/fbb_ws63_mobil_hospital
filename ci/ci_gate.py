@@ -47,6 +47,56 @@ global_combined = ''
 
 
 # ============================================================
+# 日志输出辅助函数
+# ============================================================
+
+def _phase(title: str) -> None:
+    """打印阶段标题"""
+    print(f"\n{'=' * 68}")
+    print(f"  [{title}]")
+    print(f"{'=' * 68}")
+
+
+def _step(title: str) -> None:
+    """打印步骤标题"""
+    print(f"\n  >> {title}")
+
+
+def _info(key: str, value) -> None:
+    """打印键值对信息"""
+    print(f"     {key}: {value}")
+
+
+def _ok(msg: str) -> None:
+    """打印成功信息"""
+    print(f"  [OK] {msg}")
+
+
+def _fail(msg: str) -> None:
+    """打印失败信息"""
+    print(f"  [FAIL] {msg}")
+
+
+def _warn(msg: str) -> None:
+    """打印警告信息"""
+    print(f"  [WARN] {msg}")
+
+
+def _line(msg: str = "") -> None:
+    """打印一条普通信息"""
+    print(f"    {msg}")
+
+
+def _git_branch_name() -> str:
+    """获取当前分支名称"""
+    result = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        capture_output=True, text=True
+    )
+    return result.stdout.strip() if result.returncode == 0 else "unknown"
+
+
+# ============================================================
 # git 差异分析
 # ============================================================
 
@@ -61,11 +111,17 @@ def compare_with_remote_master() -> Set[str]:
         text=True
     )
     if result.returncode != 0:
-        print(f"Error getting git diff: {result.stderr}")
+        _fail(f"git diff 失败: {result.stderr}")
         sys.exit(-1)
 
     changed_files = result.stdout.strip().split("\n") if result.stdout else []
-    print(f"[compare_with_remote_master] changed_files: {changed_files}")
+    _info("当前分支", _git_branch_name())
+    _info("对比基线", "origin/master")
+    _info(f"变更文件数", len(changed_files))
+    if changed_files:
+        for f in changed_files:
+            normalized = f.replace('\\', '/')
+            print(f"      - {normalized}")
 
     return check_changes_and_get_folders(changed_files)
 
@@ -91,17 +147,22 @@ def check_changes_and_get_folders(changed_files: List[str]) -> Optional[Set[str]
         if normalized in ('ci/ci_gate.py', 'ci_gate.py'):
             has_src_changes = True
             ci_gate_modified = True
-            print("ci_gate.py modified, running test suite first...")
+            _step("检测到 ci_gate.py 自身变更, 先运行门禁测试用例")
             run_ci_gate_tests()
 
     # 仅保留 .c / .h 文件
     c_h_files = [f for f in changed_files if f.endswith(('.c', '.h'))]
+    _info("C/H 变更文件数", len(c_h_files))
+    if c_h_files:
+        for f in c_h_files:
+            print(f"      - {f.replace(chr(92), '/')}")
+
     if not c_h_files:
         if ci_gate_modified:
-            print("[Changed folders]: set()")
-            print("[has_src_changes]: True")
+            _info("变更来源", "仅 ci_gate.py (自身)")
+            _info("编译策略", "全量编译 SDK")
             return set()
-        print("Not need build, only non-source files modified")
+        _info("结论", "无 C/H 文件变更, 跳过编译")
         return None
 
     changed_folders = set()
@@ -117,8 +178,8 @@ def check_changes_and_get_folders(changed_files: List[str]) -> Optional[Set[str]
                 folder_name = '+'.join(parts[1:4])
                 changed_folders.add(folder_name)
 
-    print(f"[Changed folders]: {changed_folders}")
-    print(f"[has_src_changes]: {has_src_changes}")
+    _info("has_src_changes", has_src_changes)
+    _info("受影响的 vendor key", changed_folders if changed_folders else "(无)")
     return changed_folders
 
 
@@ -132,14 +193,12 @@ def process_build_info_files() -> List[dict]:
 
     每条目包含: file_path, build_target, sample_name, platform, build_defs
     """
-    print("start process_build_info_files")
     result_list = []
 
     for root, dirs, files in os.walk("./"):
         for file in files:
             if file == BUILD_INFO_FILENAME:
                 file_path = os.path.join(root, file).replace('\\', '/')
-                print(file_path)
 
                 with open(file_path, 'r', encoding='utf-8') as f:
                     try:
@@ -165,9 +224,10 @@ def process_build_info_files() -> List[dict]:
                             }
                             result_list.append(entry)
                     except json.JSONDecodeError:
-                        print(f"Error decoding JSON in file: {file_path}")
+                        _fail(f"JSON 解析失败: {file_path}")
                         sys.exit(-1)
 
+    _info("解析到的 build_config 文件数", len(result_list))
     return result_list
 
 
@@ -183,11 +243,8 @@ def extract_exact_match(entries: List[dict], match_list: Set[str]) -> List[dict]
 
     若 match_list 为空或无任何匹配 → sys.exit(0)
     """
-    print("start extract_exact_match")
-    print(f"[extract_exact_match] match_list: {match_list}")
-
     if not match_list:
-        print("match_list is empty")
+        _warn("match_list 为空, 无法匹配")
         sys.exit(0)
 
     exact_matches = []
@@ -205,9 +262,15 @@ def extract_exact_match(entries: List[dict], match_list: Set[str]) -> List[dict]
         if combined_key in match_list:
             exact_matches.append(entry)
 
-    print(f"[extract_exact_match] exact_matches: {exact_matches}")
+    _info("匹配到的条目数", len(exact_matches))
+    for m in exact_matches:
+        _line(f"vendor={m['file_path'].split('/')[2]}, "
+              f"sample={m['sample_name']}, "
+              f"target={m['build_target']}, "
+              f"defs={m['build_defs']}")
+
     if not exact_matches:
-        print("build-config has not been synchronously updated")
+        _fail("变更文件与 build_config.json 未匹配, 请确认 build_config 是否同步更新")
         sys.exit(0)
 
     return exact_matches
@@ -219,26 +282,27 @@ def extract_exact_match(entries: List[dict], match_list: Set[str]) -> List[dict]
 
 def run_ci_gate_tests() -> None:
     """运行 CI 门禁自身测试用例，全部通过才允许继续编译"""
-    print("Running ci_gate test suite...")
     test_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'test_ci_gate.py')
+    _info("测试脚本", test_path)
+
     result = subprocess.run(
         ["python", test_path],
         capture_output=True,
         text=True
     )
-    print(result.stdout)
     if result.returncode != 0:
-        print("ci_gate tests FAILED! Fix test failures before proceeding.")
+        _fail("门禁测试用例未全部通过!")
+        print(result.stdout)
         if result.stderr:
             print(result.stderr)
         sys.exit(result.returncode)
-    print("ci_gate tests all PASSED.")
+    _ok("门禁测试用例全部通过")
 
 
 def insert_content_before_line(file_path: str, target_line: str, content_to_insert: str) -> None:
     """在文件的 target_line 之前插入 content_to_insert；找不到则追加到末尾"""
-    print(f"insert_content_before_line: {file_path}")
     found_target_line = False
+    content_stripped = content_to_insert.strip()
     try:
         with open(file_path, 'r', encoding='utf-8') as file:
             lines = file.readlines()
@@ -246,22 +310,19 @@ def insert_content_before_line(file_path: str, target_line: str, content_to_inse
                 if target_line in lines[i]:
                     lines.insert(i, content_to_insert)
                     found_target_line = True
-                    print(f"Inserted before '{target_line}' in {file_path}")
                     break
 
             if not found_target_line:
                 lines.append(content_to_insert)
-                print(f"Appended at end of {file_path}")
 
             with open(file_path, 'w', encoding='utf-8') as file:
                 file.writelines(lines)
     except FileNotFoundError:
-        print(f"File {file_path} not found.")
+        _warn(f"文件不存在, 跳过写入: {file_path}")
 
 
 def delete_specific_content(file_path: str, content_to_delete: str) -> None:
     """删除文件中所有包含 content_to_delete 的行"""
-    print(f"delete_specific_content: {file_path}")
     with open(file_path, 'r', encoding='utf-8') as file:
         lines = file.readlines()
 
@@ -273,19 +334,17 @@ def delete_specific_content(file_path: str, content_to_delete: str) -> None:
 
 def move_file(source_file: str, new_filename: str) -> None:
     """将构建产物移动到 archives/ 目录"""
-    print("start move_file")
     target_file = os.path.join(f'../{ARCHIVE_DIRECTORY}', f'{new_filename}.fwpkg')
     os.chmod(source_file, stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
     try:
         shutil.move(source_file, target_file)
         os.chmod(target_file, stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
-        print(f"File {source_file} moved and renamed to {target_file}")
     except FileNotFoundError:
-        print(f"File {source_file} not found")
+        _warn(f"产物文件不存在: {source_file}")
     except PermissionError:
-        print(f"Permission error, cannot move file.")
+        _warn(f"权限不足, 无法移动产物: {source_file}")
     except Exception as e:
-        print(f"Error: {str(e)}")
+        _warn(f"产物移动失败: {str(e)}")
 
 
 # ============================================================
@@ -295,23 +354,16 @@ def move_file(source_file: str, new_filename: str) -> None:
 def _apply_build_defs(build_defs: List[str]) -> None:
     """
     应用构建宏:
-      - =y 或 = y 类型 → 写入 menuconfig 文件 (ws63_liteos_app.config)
+      - =y 或 = y 类型 → 写入 menuconfig 文件
       - 其他类型 (=value) → 写入 errcode.h 作为 #define
     """
     for defn in build_defs:
         if '=y' in defn or '= y' in defn:
-            insert_content_before_line(
-                MENUCONFIG_FILE,
-                CMAKE_SEARCH_STRING,
-                f'{defn}\n'
-            )
+            insert_content_before_line(MENUCONFIG_FILE, CMAKE_SEARCH_STRING, f'{defn}\n')
         else:
             def_name_cleaned = defn.replace('=', ' ')
-            insert_content_before_line(
-                ERRCODE_H_FILE,
-                ERRCODE_SEARCH_STRING,
-                f'#define {def_name_cleaned}\n'
-            )
+            insert_content_before_line(ERRCODE_H_FILE, ERRCODE_SEARCH_STRING,
+                                       f'#define {def_name_cleaned}\n')
 
 
 def _remove_build_defs(build_defs: List[str]) -> None:
@@ -347,6 +399,9 @@ def sample_build_prepare_one(entry: dict) -> None:
     platform = entry['platform']
     build_defs = entry.get('build_defs', [])
 
+    vendor_name = file_path.split('/')[2]
+    _step(f"准备编译 [{vendor_name}] {sample_name}")
+
     # 生成 global_combined 标识
     global_combined = f'{build_target}_{sample_name}_{platform}'
     if build_defs:
@@ -355,41 +410,41 @@ def sample_build_prepare_one(entry: dict) -> None:
             '-'.join(build_defs).encode('utf-8', errors='ignore')
         )
         global_combined += build_def_sha.hexdigest()[:32]
+    _info("构建标识", global_combined)
 
     # 应用构建宏
     if build_defs:
+        _info("构建宏", build_defs)
         _apply_build_defs(build_defs)
+    else:
+        _info("构建宏", "(无)")
 
     # 复制 sample 源码
     target_string = file_path.rsplit('/build_config.json', 1)[0] + '/'
     samples = sample_name.replace('-', '/')
     source_directory = target_string + samples
-    print(f"[sample_build_prepare_one] source_directory: {source_directory}")
-
     sample_basename = os.path.basename(source_directory)
     dest_path = os.path.join(SAMPLE_DIRECTORY, sample_basename)
+
+    _info("源码目录", source_directory)
+    _info("目标目录", dest_path)
 
     try:
         if os.path.exists(dest_path):
             shutil.rmtree(dest_path)
         shutil.copytree(source_directory, dest_path)
-        print(f"Directory '{source_directory}' copied to '{SAMPLE_DIRECTORY}'")
     except shutil.Error as e:
-        print(f"Error: {e}")
+        _warn(f"复制源码出错: {e}")
     except OSError as e:
-        print(f"Error: {e.strerror}")
+        _warn(f"复制源码出错: {e.strerror}")
 
     # 添加到 CMakeLists.txt
     sample_dir_name = sample_name.split('-')[-1]
-    delete_specific_content(
-        SAMPLE_CMAKELISTS_FILE,
-        f'add_subdirectory_if_exist({sample_dir_name})'
-    )
-    insert_content_before_line(
-        SAMPLE_CMAKELISTS_FILE,
-        CMAKE_SEARCH_STRING,
-        f'add_subdirectory_if_exist({sample_dir_name})\n'
-    )
+    delete_specific_content(SAMPLE_CMAKELISTS_FILE,
+                            f'add_subdirectory_if_exist({sample_dir_name})')
+    insert_content_before_line(SAMPLE_CMAKELISTS_FILE, CMAKE_SEARCH_STRING,
+                               f'add_subdirectory_if_exist({sample_dir_name})\n')
+    _info("CMakeLists", f"已添加 add_subdirectory_if_exist({sample_dir_name})")
 
 
 def sample_build_cleanup_one(entry: dict) -> None:
@@ -401,6 +456,9 @@ def sample_build_cleanup_one(entry: dict) -> None:
     """
     sample_name = entry['sample_name']
     build_defs = entry.get('build_defs', [])
+    vendor_name = entry['file_path'].split('/')[2]
+
+    _step(f"清理 [{vendor_name}] {sample_name}")
 
     sample_dir_name = sample_name.split('-')[-1]
 
@@ -409,19 +467,19 @@ def sample_build_cleanup_one(entry: dict) -> None:
         sample_path = os.path.join(SAMPLE_DIRECTORY, sample_dir_name)
         if os.path.exists(sample_path):
             shutil.rmtree(sample_path)
-            print(f"Directory {sample_path} removed.")
+            _line(f"已删除目录: {sample_path}")
     except OSError as e:
-        print(f"Error removing {sample_dir_name}: {e.strerror}")
+        _warn(f"删除目录失败 {sample_dir_name}: {e.strerror}")
 
     # 从 CMakeLists.txt 中移除
-    delete_specific_content(
-        SAMPLE_CMAKELISTS_FILE,
-        f'add_subdirectory_if_exist({sample_dir_name})'
-    )
+    delete_specific_content(SAMPLE_CMAKELISTS_FILE,
+                            f'add_subdirectory_if_exist({sample_dir_name})')
+    _line(f"已从 CMakeLists.txt 移除 add_subdirectory_if_exist({sample_dir_name})")
 
     # 移除构建宏
     if build_defs:
         _remove_build_defs(build_defs)
+        _line(f"已移除构建宏: {build_defs}")
 
 
 # ============================================================
@@ -433,8 +491,12 @@ def compile_sdk_and_save_log(build_target_name: str) -> None:
     在 src/ 目录下执行编译，将日志保存到 archives/，
     构建产物 .fwpkg 移动到 archives/。
     """
-    print("start compile_sdk_and_save_log")
-    print(f"Current working directory: {os.getcwd()}")
+    _phase("执行编译")
+    _info("构建目标", build_target_name)
+    _info("构建标识", global_combined)
+    _info("工作目录", os.path.abspath(BUILD_DIRECTORY))
+
+    start_time = time.time()
 
     # 确保 archives 目录存在
     if not os.path.exists("./archives"):
@@ -442,6 +504,7 @@ def compile_sdk_and_save_log(build_target_name: str) -> None:
 
     os.chdir(BUILD_DIRECTORY)
     log_path = os.path.join('..', 'archives', f'build-{global_combined}.log')
+    _info("日志文件", os.path.abspath(log_path))
 
     writer = os.fdopen(os.open(
         log_path,
@@ -476,7 +539,7 @@ def compile_sdk_and_save_log(build_target_name: str) -> None:
                     continue
                 else:
                     process.kill()
-                    raise Exception("build exit cause: timeout")
+                    raise Exception("构建超时")
 
             try:
                 outs = line.decode('utf-8', errors='strict').rstrip()
@@ -487,19 +550,22 @@ def compile_sdk_and_save_log(build_target_name: str) -> None:
                     continue
                 else:
                     process.kill()
-                    raise Exception("build timeout")
+                    raise Exception("构建超时")
             print(outs)
+
+        elapsed = time.time() - start_time
+        _info("构建耗时", f"{elapsed:.1f}s")
 
         if process.returncode == 0:
             writer.write(b"Finished: SUCCESS")
-            print(f"SDK compilation succeeded. Log saved to '{log_path}'.")
+            _ok(f"编译成功, 日志已保存至: {log_path}")
         else:
-            print(f"SDK compilation failed. Check '{log_path}' for details.")
             writer.write(b"Finished: FAILURE")
+            _fail(f"编译失败! 请检查日志: {log_path}")
             print(process.stderr.read().decode('utf-8'))
 
     except Exception as e:
-        print(f"An error occurred: {str(e)}")
+        _fail(f"编译异常: {str(e)}")
     finally:
         if writer:
             writer.close()
@@ -521,25 +587,37 @@ def main() -> None:
       3. 有 vendor/ 变更（不论是否有 src 变更）→ 匹配 build_config，逐个编译 sample
     """
     global global_combined
-    print("start main")
+
+    # -------- 阶段1: 分析变更 --------
+    _phase("阶段1: 分析变更")
+
+    _info("当前分支", _git_branch_name())
+    _info("对比基线", "origin/master")
 
     check_list = compare_with_remote_master()
 
     if check_list is None:
-        print("No C/H files changed, skip build")
+        _ok("无 C/H 文件变更, 门禁通过 (无需编译)")
         sys.exit(0)
 
+    # -------- 阶段2: 决策 & 执行 --------
+
     if has_src_changes and not check_list:
-        # 仅 src/ 下的 C/H 文件变更，vendor 无变更 → 全量编译 SDK
-        print("Only src modifications detected, compiling SDK directly")
+        # 仅 src/ 变更 → 全量编译 SDK
+        _phase("阶段2: 全量编译 SDK (仅 src/ 变更)")
         global_combined = 'ws63-liteos-app'
         compile_sdk_and_save_log('ws63-liteos-app')
+
     else:
-        # vendor 有变更（可能同时有 src 变更）→ 逐个编译受影响的 sample
+        # vendor 有变更 → 匹配 build_config，逐个编译 sample
+        _phase("阶段2: 匹配构建配置")
         entries = process_build_info_files()
         matched = extract_exact_match(entries, check_list)
 
-        for entry in matched:
+        _phase("阶段3: 逐项编译 sample")
+        total = len(matched)
+        for idx, entry in enumerate(matched, 1):
+            _info(f"[{idx}/{total}] 开始处理", f"{entry['file_path'].split('/')[2]} / {entry['sample_name']}")
             sample_build_prepare_one(entry)
             compile_sdk_and_save_log(entry['build_target'])
             # compile_sdk_and_save_log 内会 chdir 到 src/，回到项目根目录
@@ -548,7 +626,17 @@ def main() -> None:
             os.chdir(parent_dir)
             sample_build_cleanup_one(entry)
 
-    print("all build step execute end")
+    # -------- 阶段4: 结果汇总 --------
+    _phase("门禁完成")
+    _ok("所有编译步骤已执行完毕")
+
+    # 汇总产物
+    if os.path.exists(ARCHIVE_DIRECTORY):
+        artifacts = os.listdir(ARCHIVE_DIRECTORY)
+        if artifacts:
+            _info("产物目录", os.path.abspath(ARCHIVE_DIRECTORY))
+            for a in artifacts:
+                _line(a)
 
 
 if __name__ == '__main__':
