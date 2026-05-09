@@ -27,17 +27,16 @@ from typing import List, Set, Optional
 # 常量定义
 # ============================================================
 BUILD_INFO_FILENAME = 'build_config.json'
-ws63_cmakelist_search_string = 'build_component()'
-ws63_compile_cmakelistfile = 'src/application/samples/CMakeLists.txt'
-ws63_menuconfig_file = 'src/build/config/target_config/ws63/menuconfig/acore/ws63_liteos_app.config'
-ws63_compile_sample_directory = 'src/application/samples'
-build_directory_path = 'src'
-script_to_execute = 'build.py'
-ws63_output_source_directory = 'output/ws63/fwpkg/ws63-liteos-app/ws63-liteos-app_all.fwpkg'
-ws63_log_image_target_directory = 'archives'
-global_combined = ''
-ws63_error_h = 'src/include/errcode.h'
-ws63_error_search_string = '#define ERRCODE_SUCC                                        0UL'
+CMAKE_SEARCH_STRING = 'build_component()'
+SAMPLE_CMAKELISTS_FILE = 'src/application/samples/CMakeLists.txt'
+MENUCONFIG_FILE = 'src/build/config/target_config/ws63/menuconfig/acore/ws63_liteos_app.config'
+SAMPLE_DIRECTORY = 'src/application/samples'
+BUILD_DIRECTORY = 'src'
+BUILD_SCRIPT = 'build.py'
+OUTPUT_FWPKG_PATH = 'output/ws63/fwpkg/ws63-liteos-app/ws63-liteos-app_all.fwpkg'
+ARCHIVE_DIRECTORY = 'archives'
+ERRCODE_H_FILE = 'src/include/errcode.h'
+ERRCODE_SEARCH_STRING = '#define ERRCODE_SUCC                                        0UL'
 DEFAULT_BUILD_TIMEOUT = 60 * 5
 
 # ============================================================
@@ -76,7 +75,7 @@ def check_changes_and_get_folders(changed_files: List[str]) -> Optional[Set[str]
     分析变更文件列表。
 
     - 如果只有非 C/H 文件变更 → 返回 None（无需编译）
-    - 如果变更了 ci/ci_gate.py 本身 → sys.exit(0)（脚本自身变更，跳过）
+    - 如果变更了 ci/ci_gate.py 本身 → 先跑测试用例, 然后设置 has_src_changes = True 触发全量编译
     - src/ 下的 C/H 变更 → 设置 has_src_changes = True
     - vendor/ 下的 C/H 变更 → 提取 "{vendor_name}+{subdir}+{sample}" key 加入返回集合
 
@@ -218,7 +217,7 @@ def extract_exact_match(entries: List[dict], match_list: Set[str]) -> List[dict]
 # 文件操作工具
 # ============================================================
 
-def run_ci_gate_tests():
+def run_ci_gate_tests() -> None:
     """运行 CI 门禁自身测试用例，全部通过才允许继续编译"""
     print("Running ci_gate test suite...")
     test_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'test_ci_gate.py')
@@ -236,7 +235,7 @@ def run_ci_gate_tests():
     print("ci_gate tests all PASSED.")
 
 
-def insert_content_before_line(file_path: str, target_line: str, content_to_insert: str):
+def insert_content_before_line(file_path: str, target_line: str, content_to_insert: str) -> None:
     """在文件的 target_line 之前插入 content_to_insert；找不到则追加到末尾"""
     print(f"insert_content_before_line: {file_path}")
     found_target_line = False
@@ -260,7 +259,7 @@ def insert_content_before_line(file_path: str, target_line: str, content_to_inse
         print(f"File {file_path} not found.")
 
 
-def delete_specific_content(file_path: str, content_to_delete: str):
+def delete_specific_content(file_path: str, content_to_delete: str) -> None:
     """删除文件中所有包含 content_to_delete 的行"""
     print(f"delete_specific_content: {file_path}")
     with open(file_path, 'r', encoding='utf-8') as file:
@@ -272,10 +271,10 @@ def delete_specific_content(file_path: str, content_to_delete: str):
         file.writelines(modified_lines)
 
 
-def move_file(source_file: str, new_filename: str):
+def move_file(source_file: str, new_filename: str) -> None:
     """将构建产物移动到 archives/ 目录"""
     print("start move_file")
-    target_file = os.path.join(f'../{ws63_log_image_target_directory}', f'{new_filename}.fwpkg')
+    target_file = os.path.join(f'../{ARCHIVE_DIRECTORY}', f'{new_filename}.fwpkg')
     os.chmod(source_file, stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
     try:
         shutil.move(source_file, target_file)
@@ -293,7 +292,7 @@ def move_file(source_file: str, new_filename: str):
 # 构建宏处理
 # ============================================================
 
-def _apply_build_defs(build_defs: List[str]):
+def _apply_build_defs(build_defs: List[str]) -> None:
     """
     应用构建宏:
       - =y 或 = y 类型 → 写入 menuconfig 文件 (ws63_liteos_app.config)
@@ -302,20 +301,20 @@ def _apply_build_defs(build_defs: List[str]):
     for defn in build_defs:
         if '=y' in defn or '= y' in defn:
             insert_content_before_line(
-                ws63_menuconfig_file,
-                ws63_cmakelist_search_string,
+                MENUCONFIG_FILE,
+                CMAKE_SEARCH_STRING,
                 f'{defn}\n'
             )
         else:
             def_name_cleaned = defn.replace('=', ' ')
             insert_content_before_line(
-                ws63_error_h,
-                ws63_error_search_string,
+                ERRCODE_H_FILE,
+                ERRCODE_SEARCH_STRING,
                 f'#define {def_name_cleaned}\n'
             )
 
 
-def _remove_build_defs(build_defs: List[str]):
+def _remove_build_defs(build_defs: List[str]) -> None:
     """
     移除构建宏（与 _apply_build_defs 对应）:
       - =y / = y 类型 → 从 menuconfig 文件中删除
@@ -323,17 +322,17 @@ def _remove_build_defs(build_defs: List[str]):
     """
     for defn in build_defs:
         if '=y' in defn or '= y' in defn:
-            delete_specific_content(ws63_menuconfig_file, defn)
+            delete_specific_content(MENUCONFIG_FILE, defn)
         else:
             def_name_cleaned = defn.replace('=', ' ')
-            delete_specific_content(ws63_error_h, f'#define {def_name_cleaned}')
+            delete_specific_content(ERRCODE_H_FILE, f'#define {def_name_cleaned}')
 
 
 # ============================================================
 # 单个 sample 的 prepare / cleanup
 # ============================================================
 
-def sample_build_prepare_one(entry: dict):
+def sample_build_prepare_one(entry: dict) -> None:
     """
     为单个 sample 做编译前准备:
       1. 应用构建宏 (menuconfig / errcode.h)
@@ -368,13 +367,13 @@ def sample_build_prepare_one(entry: dict):
     print(f"[sample_build_prepare_one] source_directory: {source_directory}")
 
     sample_basename = os.path.basename(source_directory)
-    dest_path = os.path.join(ws63_compile_sample_directory, sample_basename)
+    dest_path = os.path.join(SAMPLE_DIRECTORY, sample_basename)
 
     try:
         if os.path.exists(dest_path):
             shutil.rmtree(dest_path)
         shutil.copytree(source_directory, dest_path)
-        print(f"Directory '{source_directory}' copied to '{ws63_compile_sample_directory}'")
+        print(f"Directory '{source_directory}' copied to '{SAMPLE_DIRECTORY}'")
     except shutil.Error as e:
         print(f"Error: {e}")
     except OSError as e:
@@ -383,17 +382,17 @@ def sample_build_prepare_one(entry: dict):
     # 添加到 CMakeLists.txt
     sample_dir_name = sample_name.split('-')[-1]
     delete_specific_content(
-        ws63_compile_cmakelistfile,
+        SAMPLE_CMAKELISTS_FILE,
         f'add_subdirectory_if_exist({sample_dir_name})'
     )
     insert_content_before_line(
-        ws63_compile_cmakelistfile,
-        ws63_cmakelist_search_string,
+        SAMPLE_CMAKELISTS_FILE,
+        CMAKE_SEARCH_STRING,
         f'add_subdirectory_if_exist({sample_dir_name})\n'
     )
 
 
-def sample_build_cleanup_one(entry: dict):
+def sample_build_cleanup_one(entry: dict) -> None:
     """
     单个 sample 编译后清理:
       1. 删除 sample 源码目录
@@ -407,7 +406,7 @@ def sample_build_cleanup_one(entry: dict):
 
     # 删除 sample 目录
     try:
-        sample_path = os.path.join(ws63_compile_sample_directory, sample_dir_name)
+        sample_path = os.path.join(SAMPLE_DIRECTORY, sample_dir_name)
         if os.path.exists(sample_path):
             shutil.rmtree(sample_path)
             print(f"Directory {sample_path} removed.")
@@ -416,7 +415,7 @@ def sample_build_cleanup_one(entry: dict):
 
     # 从 CMakeLists.txt 中移除
     delete_specific_content(
-        ws63_compile_cmakelistfile,
+        SAMPLE_CMAKELISTS_FILE,
         f'add_subdirectory_if_exist({sample_dir_name})'
     )
 
@@ -429,7 +428,7 @@ def sample_build_cleanup_one(entry: dict):
 # 编译
 # ============================================================
 
-def compile_sdk_and_save_log(build_target_name: str):
+def compile_sdk_and_save_log(build_target_name: str) -> None:
     """
     在 src/ 目录下执行编译，将日志保存到 archives/，
     构建产物 .fwpkg 移动到 archives/。
@@ -441,7 +440,7 @@ def compile_sdk_and_save_log(build_target_name: str):
     if not os.path.exists("./archives"):
         os.mkdir("./archives")
 
-    os.chdir(build_directory_path)
+    os.chdir(BUILD_DIRECTORY)
     log_path = os.path.join('..', 'archives', f'build-{global_combined}.log')
 
     writer = os.fdopen(os.open(
@@ -459,7 +458,7 @@ def compile_sdk_and_save_log(build_target_name: str):
     args = ['-c', build_target_name]
     try:
         process = subprocess.Popen(
-            ['python', script_to_execute] + args,
+            ['python', BUILD_SCRIPT] + args,
             text=False,
             stdout=writer,
             stderr=writer
@@ -507,14 +506,14 @@ def compile_sdk_and_save_log(build_target_name: str):
         if reader:
             reader.close()
 
-    move_file(ws63_output_source_directory, global_combined)
+    move_file(OUTPUT_FWPKG_PATH, global_combined)
 
 
 # ============================================================
 # 主入口
 # ============================================================
 
-def main():
+def main() -> None:
     """
     门禁主流程:
       1. git diff 获取变更文件，分析受影响范围
