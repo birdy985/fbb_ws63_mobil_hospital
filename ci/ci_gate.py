@@ -384,6 +384,52 @@ def _remove_build_defs(build_defs: List[str]) -> None:
 # 单个 sample 的 prepare / cleanup
 # ============================================================
 
+def _build_artifact_name(build_target: str, sample_name: str,
+                         platform: str, build_defs: List[str]) -> str:
+    """生成构建产物名称"""
+    name = f'{build_target}_{sample_name}_{platform}'
+    if build_defs:
+        name += '_'
+        sha = hashlib.sha256('-'.join(build_defs).encode('utf-8', errors='ignore'))
+        name += sha.hexdigest()[:32]
+    return name
+
+
+def _load_src_build_info() -> List[dict]:
+    """读取 ci/build_config.json 获取 src 侧构建目标"""
+    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               'build_config.json')
+    _info("SRC 构建配置", config_path)
+    with open(config_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+
+    result = []
+    for item in data:
+        build_defs = []
+        if item.get('buildDef', ''):
+            build_defs = [d.strip() for d in item['buildDef'].split(',') if d.strip()]
+
+        entry = {
+            'file_path': config_path.replace('\\', '/'),
+            'build_target': item.get('buildTarget', ''),
+            'sample_name': item.get('relativePath', '').replace('/', '-'),
+            'platform': item.get('chip', ''),
+            'build_defs': build_defs,
+        }
+        result.append(entry)
+
+    _info("SRC 构建条目数", len(result))
+    for e in result:
+        _line(f"target={e['build_target']}, name={e['sample_name']}, "
+              f"platform={e['platform']}, defs={e['build_defs']}")
+    return result
+
+
+def _is_src_entry(entry: dict) -> bool:
+    """判断是否为 src 侧构建条目（非 vendor sample）"""
+    return '/ci/build_config.json' in entry.get('file_path', '')
+
+
 def sample_build_prepare_one(entry: dict) -> None:
     """
     为单个 sample 做编译前准备:
@@ -399,17 +445,18 @@ def sample_build_prepare_one(entry: dict) -> None:
     platform = entry['platform']
     build_defs = entry.get('build_defs', [])
 
-    vendor_name = file_path.split('/')[2]
-    _step(f"准备编译 [{vendor_name}] {sample_name}")
+    is_src = _is_src_entry(entry)
+    if is_src:
+        _step(f"准备编译 [SRC] {sample_name}")
+        source = entry.get('description', '')
+        if source:
+            _info("说明", source)
+    else:
+        vendor_name = file_path.split('/')[2]
+        _step(f"准备编译 [{vendor_name}] {sample_name}")
 
     # 生成 global_combined 标识
-    global_combined = f'{build_target}_{sample_name}_{platform}'
-    if build_defs:
-        global_combined += '_'
-        build_def_sha = hashlib.sha256(
-            '-'.join(build_defs).encode('utf-8', errors='ignore')
-        )
-        global_combined += build_def_sha.hexdigest()[:32]
+    global_combined = _build_artifact_name(build_target, sample_name, platform, build_defs)
     _info("构建标识", global_combined)
 
     # 应用构建宏
@@ -418,6 +465,10 @@ def sample_build_prepare_one(entry: dict) -> None:
         _apply_build_defs(build_defs)
     else:
         _info("构建宏", "(无)")
+
+    if is_src:
+        # src 侧构建无需复制 sample 源码和修改 CMakeLists
+        return
 
     # 复制 sample 源码
     target_string = file_path.rsplit('/build_config.json', 1)[0] + '/'
@@ -456,9 +507,20 @@ def sample_build_cleanup_one(entry: dict) -> None:
     """
     sample_name = entry['sample_name']
     build_defs = entry.get('build_defs', [])
-    vendor_name = entry['file_path'].split('/')[2]
+    is_src = _is_src_entry(entry)
 
-    _step(f"清理 [{vendor_name}] {sample_name}")
+    if is_src:
+        _step(f"清理 [SRC] {sample_name}")
+    else:
+        vendor_name = entry['file_path'].split('/')[2]
+        _step(f"清理 [{vendor_name}] {sample_name}")
+
+    if is_src:
+        # src 侧构建无需清理 sample 目录和 CMakeLists
+        if build_defs:
+            _remove_build_defs(build_defs)
+            _line(f"已移除构建宏: {build_defs}")
+        return
 
     sample_dir_name = sample_name.split('-')[-1]
 
@@ -603,10 +665,16 @@ def main() -> None:
     # -------- 阶段2: 决策 & 执行 --------
 
     if has_src_changes and not check_list:
-        # 仅 src/ 变更 → 全量编译 SDK
+        # 仅 src/ 变更 → 从 ci/build_config.json 读取构建目标，全量编译 SDK
         _phase("阶段2: 全量编译 SDK (仅 src/ 变更)")
-        global_combined = 'ws63-liteos-app'
-        compile_sdk_and_save_log('ws63-liteos-app')
+        src_entries = _load_src_build_info()
+        for entry in src_entries:
+            sample_build_prepare_one(entry)
+            compile_sdk_and_save_log(entry['build_target'])
+            current_dir = os.getcwd()
+            parent_dir = os.path.abspath(os.path.join(current_dir, os.pardir))
+            os.chdir(parent_dir)
+            sample_build_cleanup_one(entry)
 
     else:
         # vendor 有变更 → 匹配 build_config，逐个编译 sample

@@ -30,6 +30,14 @@ SRC_UART_H_FILE = 'src/application/samples/peripheral/uart/uart.h'
 README_FILE = 'README.md'
 CMAKE_FILE = 'src/application/samples/CMakeLists.txt'
 
+SRC_MOCK_ENTRY = {
+    'file_path': './ci/build_config.json',
+    'build_target': 'ws63-liteos-app',
+    'sample_name': 'sdk-full',
+    'platform': 'WS63',
+    'build_defs': [],
+}
+
 MOCK_ENTRIES = [
     {
         'file_path': './vendor/HiHope_NearLink_DK_WS63E_V03/build_config.json',
@@ -183,17 +191,18 @@ class TestMainFlow(unittest.TestCase):
         gate.global_combined = ''
 
     def test_only_src_calls_compile_directly(self):
-        """仅src修改 → 直接编译SDK，不调extract_exact_match"""
+        """仅src修改 → 读取ci/build_config.json编译SDK，不调extract_exact_match"""
         gate.has_src_changes = True
         with patch.object(gate, 'compare_with_remote_master', return_value=set()):
-            with patch.object(gate, 'process_build_info_files', return_value=MOCK_ENTRIES):
+            with patch.object(gate, '_load_src_build_info', return_value=[SRC_MOCK_ENTRY]):
                 with patch.object(gate, 'compile_sdk_and_save_log') as mock_compile:
                     with patch.object(gate, 'extract_exact_match') as mock_extract:
-                        gate.main()
+                        with patch.object(gate, 'process_build_info_files'):
+                            gate.main()
 
         mock_compile.assert_called_once_with('ws63-liteos-app')
         mock_extract.assert_not_called()
-        self.assertEqual(gate.global_combined, 'ws63-liteos-app')
+        self.assertEqual(gate.global_combined, 'ws63-liteos-app_sdk-full_WS63')
 
     def test_only_vendor_goes_prepare_compile_cleanup_loop(self):
         """仅vendor修改 → extract + prepare/compile/cleanup循环"""
