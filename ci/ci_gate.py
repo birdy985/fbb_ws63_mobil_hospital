@@ -6,11 +6,14 @@
 """
 CI 门禁脚本, 根据变更来源决定编译范围:
 
-    仅 vendor/ 下 .c/.h 变更 → 逐一编译受影响的 sample
-    仅 src/    下 .c/.h 变更 → 全量编译 SDK
-    两者同时变更              → 逐一编译受影响的 sample
-    无 .c/.h 变更             → 跳过
-    ci_gate.py 自身变更       → 先跑测试用例, 再全量编译
+    仅 vendor/ 下构建相关文件变更 → 逐一编译受影响的 sample
+    仅 src/    下构建相关文件变更 → 全量编译 SDK
+    两者同时变更                  → 逐一编译受影响的 sample
+    无构建相关文件变更            → 跳过
+    ci_gate.py 自身变更           → 先跑测试用例, 再全量编译
+
+文件过滤采用黑名单模式: 只排除明确不会影响构建的文档(.md/.rst)、图片(.png/.jpg等)
+和 git 配置文件(.gitignore等), 其余所有文件变更均视为可能影响构建。
 """
 
 import subprocess
@@ -38,6 +41,24 @@ ARCHIVE_DIRECTORY = 'archives'
 ERRCODE_H_FILE = 'src/include/errcode.h'
 ERRCODE_SEARCH_STRING = '#define ERRCODE_SUCC                                        0UL'
 DEFAULT_BUILD_TIMEOUT = 60 * 5
+
+# 明确不会影响构建结果的文件（黑名单）
+# 不在黑名单中的文件一律视为可能影响构建
+NON_BUILD_EXTENSIONS = (
+    '.md', '.rst',                                     # 文档
+    '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico',   # 图片
+    '.bmp',
+)
+
+NON_BUILD_BASENAMES = (
+    '.gitignore',
+    '.gitattributes',
+    '.gitmodules',
+    'README',
+    'CHANGELOG',
+    'LICENSE',
+    'NOTICE',
+)
 
 # ============================================================
 # 全局状态
@@ -96,6 +117,25 @@ def _git_branch_name() -> str:
     return result.stdout.strip() if result.returncode == 0 else "unknown"
 
 
+def _is_build_relevant(file_path: str) -> bool:
+    """
+    判断文件是否可能影响构建结果（黑名单模式）。
+
+    只排除明确不会影响构建的文件（文档、图片、git 配置等），
+    其余文件一律视为可能影响构建。
+    """
+    normalized = file_path.replace('\\', '/')
+    basename = os.path.basename(normalized)
+
+    if basename.endswith(NON_BUILD_EXTENSIONS):
+        return False
+
+    if basename in NON_BUILD_BASENAMES:
+        return False
+
+    return True
+
+
 # ============================================================
 # git 差异分析
 # ============================================================
@@ -128,12 +168,12 @@ def compare_with_remote_master() -> Set[str]:
 
 def check_changes_and_get_folders(changed_files: List[str]) -> Optional[Set[str]]:
     """
-    分析变更文件列表。
+    分析变更文件列表（黑名单模式: 仅排除文档/图片/git配置, 其余均视为构建相关）。
 
-    - 如果只有非 C/H 文件变更 → 返回 None（无需编译）
+    - 如果只有非构建相关文件变更 → 返回 None（无需编译）
     - 如果变更了 ci/ci_gate.py 本身 → 先跑测试用例, 然后设置 has_src_changes = True 触发全量编译
-    - src/ 下的 C/H 变更 → 设置 has_src_changes = True
-    - vendor/ 下的 C/H 变更 → 提取 "{vendor_name}+{subdir}+{sample}" key 加入返回集合
+    - src/ 下的构建相关文件变更 → 设置 has_src_changes = True
+    - vendor/ 下的构建相关文件变更 → 提取 "{vendor_name}+{subdir}+{sample}" key 加入返回集合
 
     返回: None（无需编译）或 Set[str]（受影响的 vendor key 集合，可能为空）
     """
@@ -150,23 +190,23 @@ def check_changes_and_get_folders(changed_files: List[str]) -> Optional[Set[str]
             _step("检测到 ci_gate.py 自身变更, 先运行门禁测试用例")
             run_ci_gate_tests()
 
-    # 仅保留 .c / .h 文件
-    c_h_files = [f for f in changed_files if f.endswith(('.c', '.h'))]
-    _info("C/H 变更文件数", len(c_h_files))
-    if c_h_files:
-        for f in c_h_files:
+    # 仅保留会影响构建结果的文件
+    build_files = [f for f in changed_files if _is_build_relevant(f)]
+    _info("构建相关变更文件数", len(build_files))
+    if build_files:
+        for f in build_files:
             print(f"      - {f.replace(chr(92), '/')}")
 
-    if not c_h_files:
+    if not build_files:
         if ci_gate_modified:
             _info("变更来源", "仅 ci_gate.py (自身)")
             _info("编译策略", "全量编译 SDK")
             return set()
-        _info("结论", "无 C/H 文件变更, 跳过编译")
+        _info("结论", "无构建相关文件变更, 跳过编译")
         return None
 
     changed_folders = set()
-    for file_path in c_h_files:
+    for file_path in build_files:
         file_path = file_path.replace('\\', '/')
 
         if file_path.startswith('src/'):

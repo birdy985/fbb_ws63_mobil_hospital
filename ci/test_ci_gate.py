@@ -28,6 +28,7 @@ VENDOR_BEEP_FILE = 'vendor/BearPi-Pico_H3863/demo/beep/beep.c'
 SRC_BLINKY_FILE = 'src/application/samples/peripheral/blinky/blinky.c'
 SRC_UART_H_FILE = 'src/application/samples/peripheral/uart/uart.h'
 README_FILE = 'README.md'
+GITIGNORE_FILE = '.gitignore'
 CMAKE_FILE = 'src/application/samples/CMakeLists.txt'
 
 SRC_MOCK_ENTRY = {
@@ -89,12 +90,19 @@ class TestCheckChangesAndGetFolders(unittest.TestCase):
         self.assertTrue(gate.has_src_changes)
         self.assertIn('HiHope_NearLink_DK_WS63E_V03+demo+led', result)
 
-    # ── 场景4: 没有 .c/.h 文件修改 ──
-    def test_no_c_or_h_files(self):
-        """无C/H文件 → 返回None, has_src_changes保持False"""
-        result = gate.check_changes_and_get_folders([README_FILE, CMAKE_FILE])
+    # ── 场景4: 只有文档/git配置文件修改 ──
+    def test_non_build_files_skipped(self):
+        """仅文档(.md)和git配置 → 返回None, has_src_changes保持False"""
+        result = gate.check_changes_and_get_folders([README_FILE, GITIGNORE_FILE])
         self.assertIsNone(result)
         self.assertFalse(gate.has_src_changes)
+
+    # ── 场景4b: CMakeLists.txt等构建系统文件修改会触发构建 ──
+    def test_build_system_files_trigger_build(self):
+        """CMakeLists.txt变更 → has_src_changes=True, 返回空set触发全量编译"""
+        result = gate.check_changes_and_get_folders([CMAKE_FILE])
+        self.assertTrue(gate.has_src_changes)
+        self.assertEqual(result, set())
 
     # ── 场景5: ci_gate.py 被修改 ──
     def test_ci_gate_modified(self):

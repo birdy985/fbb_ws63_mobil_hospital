@@ -2,19 +2,19 @@
 
 ## 核心逻辑
 
-`check_changes_and_get_folders()` 分析 git diff 产生的变更文件列表, 场景矩阵:
+`check_changes_and_get_folders()` 分析 git diff 产生的变更文件列表, 采用黑名单模式过滤文件（仅排除文档、图片、git配置等明确不影响构建的文件）, 场景矩阵:
 
-| 场景                         | has_src_changes | 返回的 set          |
-|------------------------------|-----------------|---------------------|
-| 仅 vendor/ 下 .c/.h 变更     | False           | 非空 (vendor keys)  |
-| 仅 src/    下 .c/.h 变更     | True            | 空 set              |
-| vendor/ + src/ 同时变更      | True            | 非空 (vendor keys)  |
-| 无 .c/.h 文件变更            | False           | None                |
-| ci/ci_gate.py 自身变更       | True            | 空 set              |
+| 场景                               | has_src_changes | 返回的 set          |
+|------------------------------------|-----------------|---------------------|
+| 仅 vendor/ 下构建相关文件变更       | False           | 非空 (vendor keys)  |
+| 仅 src/    下构建相关文件变更       | True            | 空 set              |
+| vendor/ + src/ 同时变更            | True            | 非空 (vendor keys)  |
+| 无构建相关文件变更                  | False           | None                |
+| ci/ci_gate.py 自身变更             | True            | 空 set              |
 
 `main()` 根据返回决定具体行为:
 
-1. **返回 None** — 无 C/H 文件变更, 直接跳过, 不执行任何编译。
+1. **返回 None** — 无构建相关文件变更 (仅变更了文档/图片/git配置等黑名单文件), 直接跳过。
 
 2. **返回空 set 且 has_src_changes == True** — 仅 src/ 变更 (或 ci_gate.py 自身变更), 直接全量编译整个 SDK:
    ```
@@ -35,7 +35,14 @@
 python ci/test_ci_gate.py
 ```
 
-全部 23 个测试用例通过后, 才允许继续编译。任何一个测试失败都会直接拦截。
+全部 24 个测试用例通过后, 才允许继续编译。任何一个测试失败都会直接拦截。
+
+## 文件过滤策略（黑名单模式）
+
+采用黑名单模式判断文件是否为"构建相关":
+
+- **黑名单（明确跳过）**: `.md`, `.rst`, `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`, `.ico`, `.bmp`, `.gitignore`, `.gitattributes`, `.gitmodules`, `README`, `CHANGELOG`, `LICENSE`, `NOTICE`
+- **其余所有文件** — 包括 `.c`, `.h`, `.s`, `.S`, `.cpp`, `CMakeLists.txt`, `Kconfig`, `Makefile`, `.py`, `.cmake`, `.mk`, `.lds`, `.config`, `.cfg`, `.json`, `.xml`, `.sh`, `.a`, `.bin` 等 — 均视为可能影响构建，变更即触发编译。
 
 ## 运行方式
 
