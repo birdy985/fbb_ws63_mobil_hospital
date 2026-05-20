@@ -1,0 +1,58 @@
+# fbb SDK capability declaration
+# Read by hs-fbb-cli to discover what verbs this SDK supports.
+# See https://gitcode.com/nearlink-vip/hs-fbb-cli docs for the schema.
+
+[fbb-sdk]
+schema_version = 1
+sdk_name = "fbb_ws63"
+sdk_version = "1.0.0"
+# A SDK may host multiple chip families (e.g. fbb_bs2x has bs20/bs21e/bs22).
+# Each chip's configuration lives at build/config/target_config/<chip>/<chip>.json.
+chips = ["ws63"]
+entry = "fbb.py"
+legacy_entry = "build.py"
+
+[verbs]
+# Implemented
+build = true
+flash = true
+monitor = true
+"create-project"   = true
+"create-component" = true
+"create-project-from-example" = true
+"set-target"       = true
+"get-target"       = true
+"list-targets"     = true
+"list-examples"    = true
+
+# Planned, not yet implemented
+clean       = false
+rebuild     = false
+info        = false
+menuconfig  = false
+reconfigure = false
+"erase-flash" = false
+size = false
+
+[examples]
+# Each entry is a directory relative to the SDK src/ root. Every direct
+# subdirectory containing a CMakeLists.txt is an example that can be
+# cloned via `fbb create-project-from-example <name>`. Order matters when
+# the same example name appears under multiple roots — first match wins.
+roots = [
+    "application/samples/peripheral",
+    "application/samples/bt/ble",
+    "application/samples/bt/sle",
+    "application/samples/bt/sle_chba",
+]
+
+[output]
+build_dir = "output"
+
+# IMPORTANT: This file declares CAPABILITIES, not implementation details.
+# Chip-specific data (chipName, baud rate, fwpkg layout, programmer wiring,
+# etc.) lives inside the SDK's own config files (e.g.
+# build/config/target_config/<chip>/<chip>.json) and is read by the SDK's
+# verb modules (fbb_flash.py, fbb_monitor.py, ...). hs-fbb-cli does NOT
+# read those internals — it only reads this toml to know what verbs the
+# SDK supports, then forwards the call.

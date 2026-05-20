@@ -97,6 +97,17 @@
 		"stop_bit": "0",
 		"parity": "N"
 	},
+	"monitor": {
+		"default_baud": 115200,
+		"reset_method": "at_rst",
+		"reset_command": "AT+RST\r\n",
+		"boot_marker_examples": [
+			"boot.",
+			"APP|dbg uart init ok.",
+			"device_module_init:: succ!",
+			"cpu 0 entering scheduler"
+		]
+	},
 	"need_sdk": true,
 	"need_project_path": true,
 	"chip_config": false,

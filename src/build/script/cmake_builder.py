@@ -202,6 +202,18 @@ class CMakeBuilder(BuildEnvironment):
             self.cmake_cmd.append('-DPRODUCT_TYPE={0}'.format(env.get('product_type')))
         else:
             self.cmake_cmd.append('-DPRODUCT_TYPE=default')
+        # Out-of-tree project: forward FBB_SDK_ROOT_DIR to cmake as -DROOT_DIR
+        # so build_project.cmake can resolve SDK-internal include paths. The
+        # cmake var name (ROOT_DIR) is the existing convention; the env var
+        # is the new public-facing knob. CMAKE_SYSTEM_NAME=Generic is set
+        # in build_project.cmake itself, no need to duplicate here.
+        sdk_root_override = os.environ.get('FBB_SDK_ROOT_DIR')
+        if sdk_root_override:
+            if not os.path.isdir(sdk_root_override):
+                raise RuntimeError(
+                    f"FBB_SDK_ROOT_DIR={sdk_root_override!r} does not exist or is not a directory."
+                )
+            self.cmake_cmd.append(f'-DROOT_DIR={sdk_root_override}')
 
         if self.dump:
             env.dump()
