@@ -17,11 +17,6 @@
 #ifndef LV_CONF_H
 #define LV_CONF_H
 
-/* Fix the issue does not build in RTOS2 os because of the built-in "__linux__" macro in the compiler */
-#ifdef __linux__
-#undef __linux__
-#endif
-
 /* If you need to include anything here, do it inside the `__ASSEMBLY__` guard */
 #if  0 && defined(__ASSEMBLY__)
 #include "my_include.h"
