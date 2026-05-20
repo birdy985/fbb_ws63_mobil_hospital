@@ -21,9 +21,24 @@ import filecmp
 
 root_path = os.path.join(os.path.split(os.path.realpath(__file__))[0], '..', '..', '..')
 root_path = os.path.abspath(root_path)
+
+# Out-of-tree project support: when FBB_BUILD_ROOT_PATH is set, build outputs
+# (output/, sdk_output_path) are placed under it while SDK source resources
+# (scripts, target_config, pkg tools) keep resolving against root_path. The
+# env var MUST point to an existing directory; bogus paths silently writing
+# output to nowhere was a real bug.
+build_root_path = root_path
+_build_root_override = os.environ.get('FBB_BUILD_ROOT_PATH')
+if _build_root_override:
+    if not os.path.isdir(_build_root_override):
+        raise RuntimeError(
+            f"FBB_BUILD_ROOT_PATH={_build_root_override!r} does not exist or is not a directory. "
+            f"Either unset it (to build in-tree) or create the directory first."
+        )
+    build_root_path = os.path.abspath(_build_root_override)
 script_path = os.path.join(root_path, 'build', 'script')
 target_config_path = os.path.join(root_path, 'build', 'config', 'target_config')
-output_root = os.path.join(root_path, 'output')
+output_root = os.path.join(build_root_path, 'output')
 sdk_output_path = os.path.join(output_root, 'sdk')
 pkg_tools_path = os.path.join(root_path, 'tools', 'pkg')
 jlink_tools_path = os.path.join(root_path, 'tools', 'bin', 'jlink_tool')
