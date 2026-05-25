@@ -72,11 +72,11 @@ set(BUILD_AS_OBJ
 )
 
 set(LOG_DEF
-    ${CMAKE_SOURCE_DIR}/middleware/chips/ws63/dfx/include/log_def_slp_radar.h
+    ${ROOT_DIR}/middleware/chips/ws63/dfx/include/log_def_slp_radar.h
 )
 
-if(EXISTS "${CMAKE_SOURCE_DIR}/open_source/libboundscheck/include")
-    set(LIBC_SEC_DIR "${CMAKE_SOURCE_DIR}/open_source/libboundscheck/include")
+if(EXISTS "${ROOT_DIR}/open_source/libboundscheck/include")
+    set(LIBC_SEC_DIR "${ROOT_DIR}/open_source/libboundscheck/include")
 endif()
 
 #指定静态库生成位置

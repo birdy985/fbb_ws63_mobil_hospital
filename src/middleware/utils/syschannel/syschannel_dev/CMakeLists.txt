@@ -26,7 +26,7 @@ set(PRIVATE_HEADER
     ${CMAKE_CURRENT_SOURCE_DIR}/mempool
     ${CMAKE_CURRENT_SOURCE_DIR}/repeater
     ${CMAKE_CURRENT_SOURCE_DIR}/../syschannel_common
-    ${CMAKE_SOURCE_DIR}/kernel/osal_adapt/inc
+    ${ROOT_DIR}/kernel/osal_adapt/inc
 )
 
 set(PRIVATE_DEFINES

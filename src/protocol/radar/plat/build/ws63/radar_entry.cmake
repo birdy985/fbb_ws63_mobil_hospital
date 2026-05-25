@@ -60,18 +60,18 @@ set(SOURCES
 )
 
 set(PUBLIC_HEADER
-    ${CMAKE_SOURCE_DIR}/middleware/utils/dfx/log/include/
-    ${CMAKE_SOURCE_DIR}/middleware/utils/hcc/cfg/
-    ${CMAKE_SOURCE_DIR}/middleware/utils/hcc/inc/
-    ${CMAKE_SOURCE_DIR}/middleware/utils/hcc/comm/
-    ${CMAKE_SOURCE_DIR}/include/middleware/services/radar/
-    ${CMAKE_SOURCE_DIR}/kernel/osal/include/debug/
-    ${CMAKE_SOURCE_DIR}/protocol/wifi/source/host/feature/
-    ${CMAKE_SOURCE_DIR}/protocol/wifi/source/host/inc/liteOS/
-    ${CMAKE_SOURCE_DIR}/protocol/wifi/rom_code/ws63/source/inc/romable/
-    ${CMAKE_SOURCE_DIR}/protocol/wifi/rom_code/ws63/source/device/forward/
-    ${CMAKE_SOURCE_DIR}/drivers/chips/ws63/porting/arch/riscv/
-    ${CMAKE_SOURCE_DIR}/drivers/chips/ws63/porting/soc/
+    ${ROOT_DIR}/middleware/utils/dfx/log/include/
+    ${ROOT_DIR}/middleware/utils/hcc/cfg/
+    ${ROOT_DIR}/middleware/utils/hcc/inc/
+    ${ROOT_DIR}/middleware/utils/hcc/comm/
+    ${ROOT_DIR}/include/middleware/services/radar/
+    ${ROOT_DIR}/kernel/osal/include/debug/
+    ${ROOT_DIR}/protocol/wifi/source/host/feature/
+    ${ROOT_DIR}/protocol/wifi/source/host/inc/liteOS/
+    ${ROOT_DIR}/protocol/wifi/rom_code/ws63/source/inc/romable/
+    ${ROOT_DIR}/protocol/wifi/rom_code/ws63/source/device/forward/
+    ${ROOT_DIR}/drivers/chips/ws63/porting/arch/riscv/
+    ${ROOT_DIR}/drivers/chips/ws63/porting/soc/
 )
 
 set(PRIVATE_HEADER

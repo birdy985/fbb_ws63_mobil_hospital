@@ -19,11 +19,11 @@ set(SOURCES
 )
 
 set(PUBLIC_HEADER
-    #${CMAKE_SOURCE_DIR}/middleware/utils/dfx/log/include/
-    #${CMAKE_SOURCE_DIR}/include/middleware/services/radar/
-    #${CMAKE_SOURCE_DIR}/kernel/osal/include/debug/
-    #${CMAKE_SOURCE_DIR}/protocol/wifi/source/host/feature/
-    #${CMAKE_SOURCE_DIR}/protocol/wifi/rom_code/ws63/source/inc/romable/
+    #${ROOT_DIR}/middleware/utils/dfx/log/include/
+    #${ROOT_DIR}/include/middleware/services/radar/
+    #${ROOT_DIR}/kernel/osal/include/debug/
+    #${ROOT_DIR}/protocol/wifi/source/host/feature/
+    #${ROOT_DIR}/protocol/wifi/rom_code/ws63/source/inc/romable/
 )
 
 set(PRIVATE_HEADER

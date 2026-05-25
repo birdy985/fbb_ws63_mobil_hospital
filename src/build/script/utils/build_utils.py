@@ -19,8 +19,18 @@ import hashlib
 import platform
 import filecmp
 
-root_path = os.path.join(os.path.split(os.path.realpath(__file__))[0], '..', '..', '..')
-root_path = os.path.abspath(root_path)
+# Use __file__ (not realpath) so Windows junctions / symlinks pointing at
+# the SDK keep their short path. Resolving them defeats the short-path
+# workaround for the 32K CreateProcess command-line limit on out-of-tree
+# builds. If FBB_SDK_DIR is set, prefer it as the authoritative SDK root
+# (this catches the case where Python imports build_utils via realpath
+# despite a junction; e.g. PowerShell launching the build).
+_env_sdk_dir = os.environ.get('FBB_SDK_DIR')
+if _env_sdk_dir and os.path.isfile(os.path.join(_env_sdk_dir, 'build.py')):
+    root_path = os.path.abspath(_env_sdk_dir)
+else:
+    root_path = os.path.join(os.path.split(os.path.abspath(__file__))[0], '..', '..', '..')
+    root_path = os.path.abspath(root_path)
 
 # Out-of-tree project support: when FBB_BUILD_ROOT_PATH is set, build outputs
 # (output/, sdk_output_path) are placed under it while SDK source resources

@@ -196,24 +196,34 @@ class CMakeBuilder(BuildEnvironment):
         self.pre_sdk(output_path, env)
         if env.get('libstd_option'):
             self.add_cmake_def(env, 'std_libs')
-        self.cmake_cmd.append(root_path)
+        # Project-as-entry: FBB_PROJECT_DIR (set by hs-fbb-cli when an
+        # fbb-project.toml is detected) flips cmake's source dir to the
+        # user's project. SDK is still passed via -DROOT_DIR.
+        #
+        # FBB_PROJECT_TARGET scopes the override to one target. SDK build.py
+        # spawns auxiliary targets (ws63-flashboot, ws63-loaderboot) as child
+        # processes that inherit the env. Those keep building in-tree because
+        # only the project's declared target matches.
+        project_dir = os.environ.get('FBB_PROJECT_DIR')
+        project_target = os.environ.get('FBB_PROJECT_TARGET')
+        # target_name from compile_target's parameter (dash form, e.g.
+        # ws63-liteos-app). Compare both forms in case manifests use either.
+        if project_dir and project_target and (
+                target_name == project_target
+                or target_name.replace('-', '_') == project_target.replace('-', '_')):
+            if not os.path.isdir(project_dir):
+                raise RuntimeError(
+                    f"FBB_PROJECT_DIR={project_dir!r} does not exist or is not a directory."
+                )
+            self.cmake_cmd.append(project_dir)
+            self.cmake_cmd.append(f'-DROOT_DIR={root_path}')
+        else:
+            self.cmake_cmd.append(root_path)
 
         if env.get('product_type'):
             self.cmake_cmd.append('-DPRODUCT_TYPE={0}'.format(env.get('product_type')))
         else:
             self.cmake_cmd.append('-DPRODUCT_TYPE=default')
-        # Out-of-tree project: forward FBB_SDK_ROOT_DIR to cmake as -DROOT_DIR
-        # so build_project.cmake can resolve SDK-internal include paths. The
-        # cmake var name (ROOT_DIR) is the existing convention; the env var
-        # is the new public-facing knob. CMAKE_SYSTEM_NAME=Generic is set
-        # in build_project.cmake itself, no need to duplicate here.
-        sdk_root_override = os.environ.get('FBB_SDK_ROOT_DIR')
-        if sdk_root_override:
-            if not os.path.isdir(sdk_root_override):
-                raise RuntimeError(
-                    f"FBB_SDK_ROOT_DIR={sdk_root_override!r} does not exist or is not a directory."
-                )
-            self.cmake_cmd.append(f'-DROOT_DIR={sdk_root_override}')
 
         if self.dump:
             env.dump()

@@ -80,14 +80,14 @@ endif()
 
 
 set(Wi-Fi-PRIVATE_HEADER
-    ${CMAKE_SOURCE_DIR}/middleware/utils/hcc/inc
-    ${CMAKE_SOURCE_DIR}/middleware/utils/hcc/comm
-    ${CMAKE_SOURCE_DIR}/middleware/utils/hcc/cfg
-    ${CMAKE_SOURCE_DIR}/kernel/osal/include
-    ${CMAKE_SOURCE_DIR}/kernel/osal_adapt/inc
+    ${ROOT_DIR}/middleware/utils/hcc/inc
+    ${ROOT_DIR}/middleware/utils/hcc/comm
+    ${ROOT_DIR}/middleware/utils/hcc/cfg
+    ${ROOT_DIR}/kernel/osal/include
+    ${ROOT_DIR}/kernel/osal_adapt/inc
 
     #watch dog
-    ${CMAKE_SOURCE_DIR}/drivers/drivers/driver/watchdog
+    ${ROOT_DIR}/drivers/drivers/driver/watchdog
 
     ${CMAKE_CURRENT_SOURCE_DIR}/source/host/feature
     ${CMAKE_CURRENT_SOURCE_DIR}/source/host/feature/interface

@@ -8,7 +8,7 @@ add_custom_target(HSO_DB
 )
 if(DEFINED LOG_CUSTOM_ENABLE)
     if(${LOG_CUSTOM_ENABLE} STREQUAL True)
-        include(${CMAKE_SOURCE_DIR}/build/script/hdbxml_custom/MessageXmlGen/messagexmlgen.cmake)
+        include(${ROOT_DIR}/build/script/hdbxml_custom/MessageXmlGen/messagexmlgen.cmake)
     endif()
 endif()
 
