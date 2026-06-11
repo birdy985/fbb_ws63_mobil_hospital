@@ -39,16 +39,16 @@ static bool g_timer_adapted[CONFIG_TIMER_MAX_NUM] = {false};
 static uint32_t get_timer_irqn(uint8_t index)
 {
     switch (index) {
-#if CONFIG_TIMER_MAX_NUM >= 1 // 1: only 1 timer
-        case 0:
+#if CONFIG_TIMER_MAX_NUM >= 1
+        case 0: // 1: only 1 timer
             return TIMER_0_IRQN;
 #endif
-#if CONFIG_TIMER_MAX_NUM >= 2 // 2: two timer
-        case 1:
+#if CONFIG_TIMER_MAX_NUM >= 2
+        case 1: // 2: two timer
             return TIMER_1_IRQN;
 #endif
-#if CONFIG_TIMER_MAX_NUM >= 3 // 3: three timer
-        case 2:
+#if CONFIG_TIMER_MAX_NUM >= 3
+        case 2: // 3: three timer
             return TIMER_2_IRQN;
 #endif
         default:

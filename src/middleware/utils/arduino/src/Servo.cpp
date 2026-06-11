@@ -234,7 +234,6 @@ void Servo::updateDutyRatio(uint16_t pulseWidth)
 {
     // Get PWM frequency
     uint32_t pwm_freq = uapi_pwm_get_frequency(m_channel);
-
     if (pwm_freq == 0) {
         pwm_freq = DEFAULT_PWM_FREQ_HZ; // Default 40MHz
     }
