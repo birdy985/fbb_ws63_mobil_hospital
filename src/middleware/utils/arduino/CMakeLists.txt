@@ -16,6 +16,10 @@ set(SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/wiring_analog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/wiring_interrupts.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/wiring_pulse.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/TimerClass.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/Servo.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/SPI.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/I2SClass.cpp
 )
 
 set(PUBLIC_HEADER
