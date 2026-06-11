@@ -89,6 +89,8 @@ target = {
             "sle_netdev", "chba_at",
             "tiot_driver",
             "lvgl",
+            "cxx_adapter",
+            "arduino",
         ],
         'ccflags': [
             "-DBOARD_ASIC", '-DPRE_ASIC',
