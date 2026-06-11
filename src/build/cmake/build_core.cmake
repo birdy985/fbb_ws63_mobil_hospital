@@ -89,6 +89,7 @@ endmacro()
 # --------------------------------------------------------------------
 macro(cfbb_build_epilogue)
     set(CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES "")
+    set(CMAKE_C_IMPLICIT_LINK_LIBRARIES "" CACHE INTERNAL "Clear C implicit libs")
 
     if(EXISTS ${CMAKE_BINARY_DIR}/auto_gen_libfunc.lds)
         file(REMOVE ${CMAKE_BINARY_DIR}/auto_gen_libfunc.lds)
