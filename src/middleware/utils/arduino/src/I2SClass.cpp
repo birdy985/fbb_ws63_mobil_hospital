@@ -53,7 +53,7 @@ static uint32_t g_i2s_rx_left_buffer[CONFIG_DATA_LEN_MAX];
 static uint32_t g_i2s_rx_right_buffer[CONFIG_DATA_LEN_MAX];
 
 // I2S TX buffer
-static volatile size_t i2s_tx_available = 0;
+static volatile size_t g_i2s_tx_available = 0;
 
 // I2S RX callback
 static void i2s_rx_callback(uint32_t *left_buff, uint32_t *right_buff, uint32_t length)
@@ -247,7 +247,7 @@ void I2SClass::end()
     m_transmitting = false;
     m_receiving = false;
     g_i2s_rx_available = 0;
-    i2s_tx_available = 0;
+    g_i2s_tx_available = 0;
 }
 
 // Set I2S pins
