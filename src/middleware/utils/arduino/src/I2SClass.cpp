@@ -48,9 +48,9 @@
 #define I2S_CHANNELS_ENUM_16CH 3
 
 // I2S RX buffer for interrupt-driven reception
-static volatile size_t i2s_rx_available = 0;
-static uint32_t i2s_rx_left_buffer[CONFIG_DATA_LEN_MAX];
-static uint32_t i2s_rx_right_buffer[CONFIG_DATA_LEN_MAX];
+static volatile size_t g_i2s_rx_available = 0;
+static uint32_t g_i2s_rx_left_buffer[CONFIG_DATA_LEN_MAX];
+static uint32_t g_i2s_rx_right_buffer[CONFIG_DATA_LEN_MAX];
 
 // I2S TX buffer
 static volatile size_t i2s_tx_available = 0;
@@ -59,9 +59,9 @@ static volatile size_t i2s_tx_available = 0;
 static void i2s_rx_callback(uint32_t *left_buff, uint32_t *right_buff, uint32_t length)
 {
     if (length <= CONFIG_DATA_LEN_MAX) {
-        (void)memcpy_s(i2s_rx_left_buffer, sizeof(i2s_rx_left_buffer), left_buff, length * sizeof(uint32_t));
-        (void)memcpy_s(i2s_rx_right_buffer, sizeof(i2s_rx_right_buffer), right_buff, length * sizeof(uint32_t));
-        i2s_rx_available = length;
+        (void)memcpy_s(g_i2s_rx_left_buffer, sizeof(g_i2s_rx_left_buffer), left_buff, length * sizeof(uint32_t));
+        (void)memcpy_s(g_i2s_rx_right_buffer, sizeof(g_i2s_rx_right_buffer), right_buff, length * sizeof(uint32_t));
+        g_i2s_rx_available = length;
     }
 }
 
@@ -127,18 +127,18 @@ __attribute__((unused)) static i2s_sample_rate_t map_sample_rate(uint32_t rate)
 // Constructor
 I2SClass::I2SClass() noexcept
     : m_initialized(false),
-      m_isMaster(true),
-      m_dmaEnabled(false),
+      m_is_master(true),
+      m_dma_enabled(false),
       m_transmitting(false),
       m_receiving(false),
-      m_sampleRate(I2S_FREQ_44K),
-      m_bitsPerSample(I2S_BITS_16),
+      m_sample_rate(I2S_FREQ_44K),
+      m_bits_per_sample(I2S_BITS_16),
       m_channels(I2S_STEREO),
-      m_sckPin(I2S_SCK_PIN),
-      m_wsPin(I2S_WS_PIN),
-      m_sdPin(I2S_SD_PIN),
-      m_sdinPin(I2S_SD_IN_PIN),
-      m_bufferSize(I2S_DEFAULT_BUFFER_SIZE),
+      m_sck_pin(I2S_SCK_PIN),
+      m_ws_pin(I2S_WS_PIN),
+      m_sd_pin(I2S_SD_PIN),
+      m_sdin_pin(I2S_SD_IN_PIN),
+      m_buffer_size(I2S_DEFAULT_BUFFER_SIZE),
       m_rxCallback(i2s_rx_callback)
 {
 }
@@ -170,13 +170,13 @@ bool I2SClass::begin(uint32_t sample_rate, uint8_t bits_per_sample, uint8_t chan
         end();
     }
 
-    m_sampleRate = sample_rate;
-    m_bitsPerSample = bits_per_sample;
+    m_sample_rate = sample_rate;
+    m_bits_per_sample = bits_per_sample;
     m_channels = channels;
 
 #if defined(CONFIG_I2S_SUPPORT) && (CONFIG_I2S_SUPPORT == 1)
     i2s_config_t config;
-    config.drive_mode = m_isMaster ? MASTER : SLAVE;
+    config.drive_mode = m_is_master ? MASTER : SLAVE;
     config.transfer_mode = STD_MODE;
     config.data_width = map_data_width(bits_per_sample);
     config.channels_num = map_channels(channels);
@@ -200,7 +200,7 @@ bool I2SClass::begin(uint32_t sample_rate, uint8_t bits_per_sample, uint8_t chan
 
 #if defined(CONFIG_I2S_SUPPORT_DMA) && (CONFIG_I2S_SUPPORT_DMA == 1)
     // Configure DMA if enabled
-    if (m_dmaEnabled) {
+    if (m_dma_enabled) {
         uapi_dma_deinit();
         uapi_dma_init();
         uapi_dma_open();
@@ -235,10 +235,10 @@ void I2SClass::end()
     uapi_i2s_deinit(SIO_BUS_0);
 
 #if defined(CONFIG_I2S_SUPPORT_DMA) && (CONFIG_I2S_SUPPORT_DMA == 1)
-    if (m_dmaEnabled) {
+    if (m_dma_enabled) {
         uapi_dma_close();
         uapi_dma_deinit();
-        m_dmaEnabled = false;
+        m_dma_enabled = false;
     }
 #endif
 #endif
@@ -246,17 +246,17 @@ void I2SClass::end()
     m_initialized = false;
     m_transmitting = false;
     m_receiving = false;
-    i2s_rx_available = 0;
+    g_i2s_rx_available = 0;
     i2s_tx_available = 0;
 }
 
 // Set I2S pins
 void I2SClass::setPins(int sck, int ws, int sd, int sdin)
 {
-    m_sckPin = sck;
-    m_wsPin = ws;
-    m_sdPin = sd;
-    m_sdinPin = sdin;
+    m_sck_pin = sck;
+    m_ws_pin = ws;
+    m_sd_pin = sd;
+    m_sdin_pin = sdin;
 }
 
 // ========== Stream Interface ==========
@@ -270,15 +270,15 @@ int I2SClass::available() const
     i2s_rx_data_t rx_data;
     errcode_t ret = uapi_i2s_get_data(SIO_BUS_0, &rx_data);
     if (ret == ERRCODE_SUCC) {
-        i2s_rx_available = rx_data.length;
-        if (i2s_rx_available > 0 && i2s_rx_available <= CONFIG_DATA_LEN_MAX) {
-            memcpy(i2s_rx_left_buffer, rx_data.left_buff, i2s_rx_available * sizeof(uint32_t));
-            memcpy(i2s_rx_right_buffer, rx_data.right_buff, i2s_rx_available * sizeof(uint32_t));
+        g_i2s_rx_available = rx_data.length;
+        if (g_i2s_rx_available > 0 && g_i2s_rx_available <= CONFIG_DATA_LEN_MAX) {
+            memcpy(g_i2s_rx_left_buffer, rx_data.left_buff, g_i2s_rx_available * sizeof(uint32_t));
+            memcpy(g_i2s_rx_right_buffer, rx_data.right_buff, g_i2s_rx_available * sizeof(uint32_t));
         }
     }
 #endif
 
-    return (int)i2s_rx_available;
+    return (int)g_i2s_rx_available;
 }
 
 int I2SClass::read()
@@ -288,12 +288,12 @@ int I2SClass::read()
     }
 
 #if defined(CONFIG_I2S_SUPPORT) && (CONFIG_I2S_SUPPORT == 1)
-    if (i2s_rx_available == 0) {
+    if (g_i2s_rx_available == 0) {
         return -1;
     }
 
-    uint32_t sample = i2s_rx_left_buffer[0];
-    i2s_rx_available = 0;
+    uint32_t sample = g_i2s_rx_left_buffer[0];
+    g_i2s_rx_available = 0;
     return (int)sample;
 #else
     return -1;
@@ -312,7 +312,7 @@ size_t I2SClass::read(uint8_t *buffer, size_t size)
 
 #if defined(CONFIG_I2S_SUPPORT) && (CONFIG_I2S_SUPPORT == 1)
 #if defined(CONFIG_I2S_SUPPORT_DMA) && (CONFIG_I2S_SUPPORT_DMA == 1)
-    if (m_dmaEnabled) {
+    if (m_dma_enabled) {
         i2s_dma_config_t dma_cfg;
         dma_cfg.src_width = I2S_DMA_WIDTH_32BIT;
         dma_cfg.dest_width = I2S_DMA_WIDTH_32BIT;
@@ -325,28 +325,28 @@ size_t I2SClass::read(uint8_t *buffer, size_t size)
 #endif
 
     // Polling mode fallback
-    if (i2s_rx_available == 0) {
+    if (g_i2s_rx_available == 0) {
         i2s_rx_data_t rx_data;
         errcode_t ret = uapi_i2s_get_data(SIO_BUS_0, &rx_data);
         if (ret == ERRCODE_SUCC) {
-            i2s_rx_available = rx_data.length;
-            if (i2s_rx_available > 0 && i2s_rx_available <= CONFIG_DATA_LEN_MAX) {
-                memcpy(i2s_rx_left_buffer, rx_data.left_buff, i2s_rx_available * sizeof(uint32_t));
-                memcpy(i2s_rx_right_buffer, rx_data.right_buff, i2s_rx_available * sizeof(uint32_t));
+            g_i2s_rx_available = rx_data.length;
+            if (g_i2s_rx_available > 0 && g_i2s_rx_available <= CONFIG_DATA_LEN_MAX) {
+                memcpy(g_i2s_rx_left_buffer, rx_data.left_buff, g_i2s_rx_available * sizeof(uint32_t));
+                memcpy(g_i2s_rx_right_buffer, rx_data.right_buff, g_i2s_rx_available * sizeof(uint32_t));
             }
         }
     }
 
-    if (i2s_rx_available == 0) {
+    if (g_i2s_rx_available == 0) {
         return 0;
     }
 
-    size_t bytes_to_copy = i2s_rx_available * sizeof(uint32_t);
+    size_t bytes_to_copy = g_i2s_rx_available * sizeof(uint32_t);
     if (bytes_to_copy > size) {
         bytes_to_copy = size;
     }
-    (void)memcpy_s(buffer, size, i2s_rx_left_buffer, bytes_to_copy);
-    i2s_rx_available = 0;
+    (void)memcpy_s(buffer, size, g_i2s_rx_left_buffer, bytes_to_copy);
+    g_i2s_rx_available = 0;
 
     return bytes_to_copy;
 #else
@@ -376,7 +376,7 @@ size_t I2SClass::write(const uint8_t *buffer, size_t size)
 
 #if defined(CONFIG_I2S_SUPPORT) && (CONFIG_I2S_SUPPORT == 1)
 #if defined(CONFIG_I2S_SUPPORT_DMA) && (CONFIG_I2S_SUPPORT_DMA == 1)
-    if (m_dmaEnabled) {
+    if (m_dma_enabled) {
         i2s_dma_config_t dma_cfg;
         dma_cfg.src_width = I2S_DMA_WIDTH_32BIT;
         dma_cfg.dest_width = I2S_DMA_WIDTH_32BIT;
@@ -407,7 +407,7 @@ void I2SClass::flush() {}
 
 void I2SClass::setSampleRate(uint32_t rate)
 {
-    m_sampleRate = rate;
+    m_sample_rate = rate;
 
 #if defined(CONFIG_I2S_SUPPORT) && (CONFIG_I2S_SUPPORT == 1) && defined(CONFIG_I2S_SUPPORT_DYNAMIC_SAMPLE_RATE)
     i2s_sample_rate_t sr = map_sample_rate(rate);
@@ -417,17 +417,17 @@ void I2SClass::setSampleRate(uint32_t rate)
 
 uint32_t I2SClass::getSampleRate() const
 {
-    return m_sampleRate;
+    return m_sample_rate;
 }
 
 void I2SClass::setBitsPerSample(uint8_t bits)
 {
-    m_bitsPerSample = bits;
+    m_bits_per_sample = bits;
 }
 
 uint8_t I2SClass::getBitsPerSample() const
 {
-    return m_bitsPerSample;
+    return m_bits_per_sample;
 }
 
 void I2SClass::setChannels(uint8_t channels)
@@ -442,19 +442,19 @@ uint8_t I2SClass::getChannels() const
 
 void I2SClass::setMaster(bool master)
 {
-    m_isMaster = master;
+    m_is_master = master;
 }
 
 bool I2SClass::isMaster() const
 {
-    return m_isMaster;
+    return m_is_master;
 }
 
 // ========== DMA Support Methods ==========
 
 void I2SClass::setDMA(bool enable)
 {
-    m_dmaEnabled = enable;
+    m_dma_enabled = enable;
 
 #if defined(CONFIG_I2S_SUPPORT) && (CONFIG_I2S_SUPPORT == 1)
 #if defined(CONFIG_I2S_SUPPORT_DMA) && (CONFIG_I2S_SUPPORT_DMA == 1)
@@ -466,7 +466,7 @@ void I2SClass::setDMA(bool enable)
             errcode_t ret = uapi_dma_init();
             if (ret != ERRCODE_SUCC) {
                 printf("[I2S] DMA init failed: 0x%08X\r\n", ret);
-                m_dmaEnabled = false;
+                m_dma_enabled = false;
                 return;
             }
             uapi_dma_open();
@@ -483,7 +483,7 @@ void I2SClass::setDMA(bool enable)
                 // DMA init succeeded but I2S DMA config failed - clean up DMA
                 uapi_dma_close();
                 uapi_dma_deinit();
-                m_dmaEnabled = false;
+                m_dma_enabled = false;
                 printf("[I2S] DMA config failed: 0x%08X\r\n", ret);
                 return;
             }
@@ -513,7 +513,7 @@ void I2SClass::setDMA(bool enable)
 bool I2SClass::isDMAEnabled() const
 {
 #if defined(CONFIG_I2S_SUPPORT_DMA) && (CONFIG_I2S_SUPPORT_DMA == 1)
-    return m_dmaEnabled;
+    return m_dma_enabled;
 #else
     // DMA not compiled in: always return false
     return false;
@@ -531,7 +531,7 @@ size_t I2SClass::writeDMA(const uint8_t *buffer, size_t size)
     }
 
 #if defined(CONFIG_I2S_SUPPORT_DMA) && (CONFIG_I2S_SUPPORT_DMA == 1)
-    if (!m_dmaEnabled) {
+    if (!m_dma_enabled) {
         // DMA flag not set, fallback to normal write
         return write(buffer, size);
     }
@@ -566,7 +566,7 @@ size_t I2SClass::readDMA(uint8_t *buffer, size_t size)
     }
 
 #if defined(CONFIG_I2S_SUPPORT_DMA) && (CONFIG_I2S_SUPPORT_DMA == 1)
-    if (!m_dmaEnabled) {
+    if (!m_dma_enabled) {
         // DMA flag not set, fallback to normal read
         return read(buffer, size);
     }
@@ -604,12 +604,12 @@ bool I2SClass::isInitialized() const
 
 size_t I2SClass::getBufferSize() const
 {
-    return m_bufferSize;
+    return m_buffer_size;
 }
 
 void I2SClass::setBufferSize(size_t size)
 {
-    m_bufferSize = size;
+    m_buffer_size = size;
 }
 
 bool I2SClass::isTransmitting() const

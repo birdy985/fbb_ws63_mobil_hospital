@@ -150,18 +150,18 @@ public:
 
 private:
     bool m_initialized;
-    bool m_isMaster;
-    bool m_dmaEnabled;
+    bool m_is_master;
+    bool m_dma_enabled;
     bool m_transmitting;
     bool m_receiving;
-    uint32_t m_sampleRate;
-    uint8_t m_bitsPerSample;
+    uint32_t m_sample_rate;
+    uint8_t m_bits_per_sample;
     uint8_t m_channels;
-    int m_sckPin;
-    int m_wsPin;
-    int m_sdPin;
-    int m_sdinPin;
-    size_t m_bufferSize;
+    int m_sck_pin;
+    int m_ws_pin;
+    int m_sd_pin;
+    int m_sdin_pin;
+    size_t m_buffer_size;
     i2s_callback_forward_t m_rxCallback;
 
     uint8_t getSampleRateEnum(uint32_t rateHz) const;

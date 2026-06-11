@@ -40,15 +40,15 @@ static uint32_t get_timer_irqn(uint8_t index)
 {
     switch (index) {
 #if CONFIG_TIMER_MAX_NUM >= 1
-        case 0: // 1: only 1 timer
+        case 0: // 0: only 1 timer
             return TIMER_0_IRQN;
 #endif
 #if CONFIG_TIMER_MAX_NUM >= 2
-        case 1: // 2: two timer
+        case 1: // 1: two timer
             return TIMER_1_IRQN;
 #endif
 #if CONFIG_TIMER_MAX_NUM >= 3
-        case 2: // 3: three timer
+        case 2: // 2: three timer
             return TIMER_2_IRQN;
 #endif
         default:
@@ -131,7 +131,12 @@ void TimerClass::callbackWrapper(uintptr_t data)
  * @param instance Timer instance number (0, 1, 2)
  */
 TimerClass::TimerClass(uint8_t instance) noexcept
-    : m_timer_handle(nullptr), m_instance(instance), m_period_us(0), m_running(false), m_callback(nullptr), m_callback_data(0)
+    : m_timer_handle(nullptr),
+      m_instance(instance),
+      m_period_us(0),
+      m_running(false),
+      m_callback(nullptr),
+      m_callback_data(0)
 {
     // Validate instance number
     if (instance >= CONFIG_TIMER_MAX_NUM) {
