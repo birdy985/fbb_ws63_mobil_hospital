@@ -14,20 +14,20 @@
 
 static void ad8232_print_sample(const ecg_monitor_sample_t *sample)
 {
-    // printf("ECG,%lu,%lu,%u,%d,%d,%d,%d,%u,%u,%u,%u\r\n",
-    //     (unsigned long)sample->seq,
-    //     (unsigned long)sample->timestamp_ms,
-    //     (unsigned int)sample->voltage_mv,
-    //     (int)sample->baseline_mv,
-    //     (int)sample->ecg_mv,
-    //     (int)sample->filtered_mv,
-    //     (int)sample->display_mv,
-    //     (unsigned int)sample->r_peak,
-    //     (unsigned int)sample->rr_interval_ms,
-    //     (unsigned int)sample->bpm,
-    //     (unsigned int)sample->quality);
+    printf("ECG,%lu,%lu,%u,%d,%d,%d,%d,%u,%u,%u,%u\r\n",
+        (unsigned long)sample->seq,
+        (unsigned long)sample->timestamp_ms,
+        (unsigned int)sample->voltage_mv,
+        (int)sample->baseline_mv,
+        (int)sample->ecg_mv,
+        (int)sample->filtered_mv,
+        (int)sample->display_mv,
+        (unsigned int)sample->r_peak,
+        (unsigned int)sample->rr_interval_ms,
+        (unsigned int)sample->bpm,
+        (unsigned int)sample->quality);
 
-    printf("%d\r\n",(int)sample->display_mv);
+    // printf("%d\r\n",(int)sample->display_mv);
 }
 
 static void *ad8232_task(const char *arg)

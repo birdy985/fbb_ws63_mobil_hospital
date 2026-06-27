@@ -1,0 +1,17 @@
+choice
+    prompt "Select AD8232 ECG SLE role"
+    default SAMPLE_SUPPORT_AD8232_SLE_SERVER
+    depends on SAMPLE_SUPPORT_AD8232_SLE
+    config SAMPLE_SUPPORT_AD8232_SLE_SERVER
+        bool "Enable AD8232 ECG SLE Server sample."
+    config SAMPLE_SUPPORT_AD8232_SLE_CLIENT
+        bool "Enable AD8232 ECG SLE Client sample."
+endchoice
+
+config SUPPORT_SLE_PERIPHERAL
+    bool
+    default y if (SAMPLE_SUPPORT_AD8232_SLE_SERVER)
+
+config SUPPORT_SLE_CENTRAL
+    bool
+    default y if (SAMPLE_SUPPORT_AD8232_SLE_CLIENT)
