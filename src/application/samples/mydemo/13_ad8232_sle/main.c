@@ -16,21 +16,27 @@
 #include "soc_osal.h"
 #include "tcxo.h"
 
+#ifdef CONFIG_SAMPLE_SUPPORT_EMQX_TELEMETRY
+#include "../15_emqx_telemetry/emqx_telemetry.h"
+#endif
+
 #if defined(CONFIG_SAMPLE_SUPPORT_AD8232_SLE_SERVER)
 #include "sle_uart_server/sle_uart_server.h"
 #include "tjc_display.h"
 #elif defined(CONFIG_SAMPLE_SUPPORT_AD8232_SLE_CLIENT)
 #include "sle_uart_client/sle_uart_client.h"
+#include "../14_spo2_sensor/max30102_bsp.h"
+#include "../14_spo2_sensor/spo2_processor.h"
 #endif
 
 #define ECG_SLE_TASK_PRIO                 osPriorityNormal
-#define ECG_SLE_TASK_STACK_SIZE           0x1800
+#define ECG_SLE_TASK_STACK_SIZE           0x2000
 #define ECG_SLE_SAMPLE_MS                 10
 #define ECG_SLE_STATS_INTERVAL_MS         2000
 #define ECG_SLE_QUEUE_LEN                 16
 #define ECG_SLE_QUEUE_DELAY               0xFFFFFFFF
 #define ECG_SLE_ADV_HANDLE_DEFAULT        1
-#define ECG_SLE_DISPLAY_UPDATE_MS         20
+#define ECG_SLE_DISPLAY_UPDATE_MS         15
 #define ECG_SLE_BPM_UPDATE_MS             500
 #define ECG_SLE_SERVER_LOG                "[ecg sle server]"
 #define ECG_SLE_CLIENT_LOG                "[ecg sle client]"
@@ -52,7 +58,7 @@ static uint32_t g_ecg_sle_last_bpm_ms;
 static void ecg_sle_server_print_header(void)
 {
     if (g_ecg_sle_header_printed == 0) {
-        osal_printk("ECG_SLE,seq,t_ms,raw_mv,base_mv,ecg_mv,filt_mv,disp_mv,r,rr_ms,bpm,q\r\n");
+        osal_printk("ECG_SLE,seq,t_ms,raw_mv,base_mv,ecg_mv,filt_mv,disp_mv,r,rr_ms,bpm,q,spo2_x10,spo2_hr,spo2_valid,spo2_q\r\n");
         g_ecg_sle_header_printed = 1;
     }
 }
@@ -110,9 +116,41 @@ static void ssaps_server_write_request_cbk(uint8_t server_id, uint16_t conn_id, 
     ecg_sle_server_write_msgqueue(write_cb_para->value, write_cb_para->length);
 }
 
+static void ecg_sle_server_update_emqx(const ecg_sle_vital_sample_t *vital, uint32_t rx_ms)
+{
+#ifdef CONFIG_SAMPLE_SUPPORT_EMQX_TELEMETRY
+    emqx_ecg_telemetry_t ecg = {
+        .seq = vital->ecg.seq,
+        .timestamp_ms = rx_ms,
+        .display_mv = vital->ecg.display_mv,
+        .heart_rate = vital->ecg.bpm,
+        .ecg_quality = (uint8_t)vital->ecg.quality,
+        .ecg_valid = true,
+    };
+    emqx_telemetry_update_ecg(&ecg);
+
+    if (vital->spo2.sample_valid) {
+        emqx_spo2_telemetry_t spo2 = {
+            .seq = vital->spo2.seq,
+            .timestamp_ms = vital->spo2.timestamp_ms == 0 ? rx_ms : vital->spo2.timestamp_ms,
+            .spo2_x10 = vital->spo2.spo2_x10,
+            .hr_bpm = vital->spo2.hr_bpm,
+            .spo2_valid = vital->spo2.spo2_valid,
+            .hr_valid = vital->spo2.hr_valid,
+            .quality = ecg_sle_spo2_quality_to_string(vital->spo2.quality),
+        };
+        emqx_telemetry_update_spo2(&spo2);
+    }
+#else
+    unused(vital);
+    unused(rx_ms);
+#endif
+}
+
 static void ecg_sle_server_handle_msg(const ecg_sle_rx_msg_t *msg)
 {
-    ecg_monitor_sample_t sample = {0};
+    ecg_sle_vital_sample_t vital = {0};
+    ecg_monitor_sample_t *sample = &vital.ecg;
     ecg_sle_packet_status_t status;
 
     if (msg->len == 0) {
@@ -125,51 +163,56 @@ static void ecg_sle_server_handle_msg(const ecg_sle_rx_msg_t *msg)
         return;
     }
 
-    status = ecg_sle_decode_sample(msg->data, msg->len, &sample);
+    status = ecg_sle_decode_vital_sample(msg->data, msg->len, &vital);
     if (status != ECG_SLE_PACKET_OK) {
         osal_printk("%s bad packet status=%s len=%u\r\n", ECG_SLE_SERVER_LOG,
             ecg_sle_packet_status_to_string(status), (unsigned int)msg->len);
         return;
     }
 
-    if ((g_ecg_sle_has_seq != 0) && (sample.seq != g_ecg_sle_expected_seq)) {
+    if ((g_ecg_sle_has_seq != 0) && (sample->seq != g_ecg_sle_expected_seq)) {
         osal_printk("%s seq gap expected=%lu received=%lu\r\n", ECG_SLE_SERVER_LOG,
-            (unsigned long)g_ecg_sle_expected_seq, (unsigned long)sample.seq);
+            (unsigned long)g_ecg_sle_expected_seq, (unsigned long)sample->seq);
     }
     g_ecg_sle_has_seq = 1;
-    g_ecg_sle_expected_seq = sample.seq + 1;
+    g_ecg_sle_expected_seq = sample->seq + 1;
 
     uint32_t rx_ms = (uint32_t)uapi_tcxo_get_ms();
     osal_printk("ECG_SLE_RX,%lu,%lu,%lu,%lu\r\n",
-        (unsigned long)sample.seq,
-        (unsigned long)sample.timestamp_ms,
+        (unsigned long)sample->seq,
+        (unsigned long)sample->timestamp_ms,
         (unsigned long)rx_ms,
-        (unsigned long)(rx_ms - sample.timestamp_ms));
+        (unsigned long)(rx_ms - sample->timestamp_ms));
 
     uint32_t now_ms = rx_ms;
     if ((now_ms - g_ecg_sle_last_display_ms) >= ECG_SLE_DISPLAY_UPDATE_MS) {
-        tjc_display_send_sample(&sample);
+        tjc_display_send_sample(sample);
         g_ecg_sle_last_display_ms = now_ms;
     }
-    if ((sample.bpm != g_ecg_sle_last_bpm) || ((now_ms - g_ecg_sle_last_bpm_ms) >= ECG_SLE_BPM_UPDATE_MS)) {
-        tjc_display_send_bpm(sample.bpm);
-        g_ecg_sle_last_bpm = sample.bpm;
+    if ((sample->bpm != g_ecg_sle_last_bpm) || ((now_ms - g_ecg_sle_last_bpm_ms) >= ECG_SLE_BPM_UPDATE_MS)) {
+        tjc_display_send_bpm(sample->bpm);
+        g_ecg_sle_last_bpm = sample->bpm;
         g_ecg_sle_last_bpm_ms = now_ms;
     }
 
     ecg_sle_server_print_header();
-    osal_printk("ECG_SLE,%lu,%lu,%u,%d,%d,%d,%d,%u,%u,%u,%u\r\n",
-        (unsigned long)sample.seq,
-        (unsigned long)sample.timestamp_ms,
-        (unsigned int)sample.voltage_mv,
-        (int)sample.baseline_mv,
-        (int)sample.ecg_mv,
-        (int)sample.filtered_mv,
-        (int)sample.display_mv,
-        (unsigned int)sample.r_peak,
-        (unsigned int)sample.rr_interval_ms,
-        (unsigned int)sample.bpm,
-        (unsigned int)sample.quality);
+    ecg_sle_server_update_emqx(&vital, rx_ms);
+    osal_printk("ECG_SLE,%lu,%lu,%u,%d,%d,%d,%d,%u,%u,%u,%u,%ld,%u,%u,%s\r\n",
+        (unsigned long)sample->seq,
+        (unsigned long)sample->timestamp_ms,
+        (unsigned int)sample->voltage_mv,
+        (int)sample->baseline_mv,
+        (int)sample->ecg_mv,
+        (int)sample->filtered_mv,
+        (int)sample->display_mv,
+        (unsigned int)sample->r_peak,
+        (unsigned int)sample->rr_interval_ms,
+        (unsigned int)sample->bpm,
+        (unsigned int)sample->quality,
+        (long)vital.spo2.spo2_x10,
+        (unsigned int)vital.spo2.hr_bpm,
+        vital.spo2.spo2_valid ? 1U : 0U,
+        ecg_sle_spo2_quality_to_string(vital.spo2.quality));
 }
 
 static void *ecg_sle_server_task(const char *arg)
@@ -212,6 +255,10 @@ static void *ecg_sle_server_task(const char *arg)
 }
 #elif defined(CONFIG_SAMPLE_SUPPORT_AD8232_SLE_CLIENT)
 static uint8_t g_ecg_sle_tx_buf[ECG_SLE_PACKET_LEN];
+static spo2_processor_t g_ecg_sle_spo2_processor;
+static ecg_sle_spo2_sample_t g_ecg_sle_latest_spo2;
+static bool g_ecg_sle_spo2_ready;
+static uint32_t g_ecg_sle_spo2_seq;
 
 void sle_uart_notification_cb(uint8_t client_id, uint16_t conn_id, ssapc_handle_value_t *data,
     errcode_t status)
@@ -231,16 +278,111 @@ void sle_uart_indication_cb(uint8_t client_id, uint16_t conn_id, ssapc_handle_va
     osal_printk("%s indication status=0x%x\r\n", ECG_SLE_CLIENT_LOG, status);
 }
 
+static ecg_sle_spo2_quality_t ecg_sle_spo2_quality_from_string(const char *quality)
+{
+    if (quality == NULL) {
+        return ECG_SLE_SPO2_QUALITY_UNKNOWN;
+    }
+    if (strcmp(quality, SPO2_PROCESSOR_STATUS_WARMUP) == 0) {
+        return ECG_SLE_SPO2_QUALITY_WARMUP;
+    }
+    if (strcmp(quality, SPO2_PROCESSOR_STATUS_OK) == 0) {
+        return ECG_SLE_SPO2_QUALITY_OK;
+    }
+    if (strcmp(quality, SPO2_PROCESSOR_STATUS_NO_FINGER) == 0) {
+        return ECG_SLE_SPO2_QUALITY_NO_FINGER;
+    }
+    if (strcmp(quality, SPO2_PROCESSOR_STATUS_LOW_SIGNAL) == 0) {
+        return ECG_SLE_SPO2_QUALITY_LOW_SIGNAL;
+    }
+    if (strcmp(quality, SPO2_PROCESSOR_STATUS_SATURATED) == 0) {
+        return ECG_SLE_SPO2_QUALITY_SATURATED;
+    }
+    if (strcmp(quality, SPO2_PROCESSOR_STATUS_NO_PULSE) == 0) {
+        return ECG_SLE_SPO2_QUALITY_NO_PULSE;
+    }
+    if (strcmp(quality, SPO2_PROCESSOR_STATUS_UNSTABLE) == 0) {
+        return ECG_SLE_SPO2_QUALITY_UNSTABLE;
+    }
+    return ECG_SLE_SPO2_QUALITY_UNKNOWN;
+}
+
+static void ecg_sle_client_init_spo2(void)
+{
+    errcode_t ret = max30102_init();
+
+    if (ret != ERRCODE_SUCC) {
+        osal_printk("%s MAX30102 init failed ret=0x%x; SpO2 disabled\r\n", ECG_SLE_CLIENT_LOG, ret);
+        g_ecg_sle_latest_spo2.sample_valid = false;
+        g_ecg_sle_latest_spo2.quality = ECG_SLE_SPO2_QUALITY_SENSOR_OFF;
+        g_ecg_sle_spo2_ready = false;
+        return;
+    }
+    spo2_processor_init(&g_ecg_sle_spo2_processor);
+    g_ecg_sle_latest_spo2.quality = ECG_SLE_SPO2_QUALITY_WARMUP;
+    g_ecg_sle_spo2_ready = true;
+    osal_printk("%s MAX30102 ready on client\r\n", ECG_SLE_CLIENT_LOG);
+}
+
+static void ecg_sle_client_poll_spo2(void)
+{
+    uint8_t available = 0;
+    errcode_t ret;
+
+    if (!g_ecg_sle_spo2_ready) {
+        return;
+    }
+
+    ret = max30102_get_fifo_sample_count(&available);
+    if (ret != ERRCODE_SUCC) {
+        osal_printk("%s MAX30102 fifo count failed ret=0x%x\r\n", ECG_SLE_CLIENT_LOG, ret);
+        return;
+    }
+
+    while (available > 0) {
+        max30102_sample_t raw = {0};
+        spo2_metric_t metric;
+
+        ret = max30102_read_fifo_sample(&raw);
+        if (ret != ERRCODE_SUCC) {
+            osal_printk("%s MAX30102 fifo read failed ret=0x%x\r\n", ECG_SLE_CLIENT_LOG, ret);
+            return;
+        }
+        if (spo2_processor_add_sample(&g_ecg_sle_spo2_processor, &raw, &metric)) {
+            g_ecg_sle_latest_spo2.seq = g_ecg_sle_spo2_seq++;
+            g_ecg_sle_latest_spo2.timestamp_ms = (uint32_t)uapi_tcxo_get_ms();
+            g_ecg_sle_latest_spo2.spo2_x10 = metric.spo2_x10;
+            g_ecg_sle_latest_spo2.hr_bpm = (uint16_t)metric.hr_bpm;
+            g_ecg_sle_latest_spo2.spo2_valid = metric.spo2_valid;
+            g_ecg_sle_latest_spo2.hr_valid = metric.hr_valid;
+            g_ecg_sle_latest_spo2.sample_valid = true;
+            g_ecg_sle_latest_spo2.quality = ecg_sle_spo2_quality_from_string(metric.quality);
+            osal_printk("SPO2_CLIENT,%lu,%lu,%ld,%u,%u,%u,%s\r\n",
+                (unsigned long)g_ecg_sle_latest_spo2.seq,
+                (unsigned long)g_ecg_sle_latest_spo2.timestamp_ms,
+                (long)g_ecg_sle_latest_spo2.spo2_x10,
+                (unsigned int)g_ecg_sle_latest_spo2.hr_bpm,
+                g_ecg_sle_latest_spo2.spo2_valid ? 1U : 0U,
+                g_ecg_sle_latest_spo2.hr_valid ? 1U : 0U,
+                ecg_sle_spo2_quality_to_string(g_ecg_sle_latest_spo2.quality));
+        }
+        available--;
+    }
+}
+
 static errcode_t ecg_sle_client_send_sample(const ecg_monitor_sample_t *sample)
 {
     ssapc_write_param_t *param = get_g_sle_uart_send_param();
     uint16_t conn_id = get_g_sle_uart_conn_id();
+    ecg_sle_vital_sample_t vital = {0};
     errcode_t ret;
 
     if ((param == NULL) || (param->handle == 0)) {
         return ERRCODE_FAIL;
     }
-    ret = ecg_sle_encode_sample(sample, g_ecg_sle_tx_buf, sizeof(g_ecg_sle_tx_buf));
+    vital.ecg = *sample;
+    vital.spo2 = g_ecg_sle_latest_spo2;
+    ret = ecg_sle_encode_vital_sample(&vital, g_ecg_sle_tx_buf, sizeof(g_ecg_sle_tx_buf));
     if (ret != ERRCODE_SUCC) {
         return ret;
     }
@@ -273,6 +415,7 @@ static void *ecg_sle_client_task(const char *arg)
         return NULL;
     }
     ecg_processor_init();
+    ecg_sle_client_init_spo2();
     last_stats_ms = (uint32_t)uapi_tcxo_get_ms();
     osal_printk("%s ready sample_ms=%u packet_len=%u\r\n", ECG_SLE_CLIENT_LOG,
         (unsigned int)ECG_SLE_SAMPLE_MS, (unsigned int)ECG_SLE_PACKET_LEN);
@@ -280,6 +423,8 @@ static void *ecg_sle_client_task(const char *arg)
     while (1) {
         uint16_t voltage_mv = 0;
         uint32_t now_ms;
+
+        ecg_sle_client_poll_spo2();
         ret = ad8232_read_mv(&voltage_mv);
         if (ret == ERRCODE_SUCC) {
             ecg_input_sample_t input = {
@@ -289,19 +434,7 @@ static void *ecg_sle_client_task(const char *arg)
             };
             ecg_monitor_sample_t output = {0};
             ecg_processor_process(&input, &output);
-            // printf("%d\r\n", (int)output.display_mv);
-            osal_printk("ECG_SLE,%lu,%lu,%u,%d,%d,%d,%d,%u,%u,%u,%u\r\n",
-                (unsigned long)output.seq,
-                (unsigned long)output.timestamp_ms,
-                (unsigned int)output.voltage_mv,
-                (int)output.baseline_mv,
-                (int)output.ecg_mv,
-                (int)output.filtered_mv,
-                (int)output.display_mv,
-                (unsigned int)output.r_peak,
-                (unsigned int)output.rr_interval_ms,
-                (unsigned int)output.bpm,
-                (unsigned int)output.quality);
+            osal_printk("%d\r\n", (int)output.display_mv);
             if (!sle_uart_client_can_send()) {
                 backpressure_count++;
             } else {
@@ -320,12 +453,13 @@ static void *ecg_sle_client_task(const char *arg)
 
         now_ms = (uint32_t)uapi_tcxo_get_ms();
         if ((now_ms - last_stats_ms) >= ECG_SLE_STATS_INTERVAL_MS) {
-            osal_printk("%s stats sent=%lu drop=%lu backpressure=%lu fail=%lu cfm=%lu cfm_fail=%lu handle=0x%x\r\n",
+            osal_printk("%s stats sent=%lu drop=%lu backpressure=%lu fail=%lu cfm=%lu cfm_fail=%lu handle=0x%x spo2=%u\r\n",
                 ECG_SLE_CLIENT_LOG,
                 (unsigned long)sent_count, (unsigned long)drop_count, (unsigned long)backpressure_count,
                 (unsigned long)fail_count, (unsigned long)sle_uart_client_get_write_cfm_count(),
                 (unsigned long)sle_uart_client_get_write_cfm_fail_count(),
-                (unsigned int)get_g_sle_uart_send_param()->handle);
+                (unsigned int)get_g_sle_uart_send_param()->handle,
+                g_ecg_sle_latest_spo2.sample_valid ? 1U : 0U);
             last_stats_ms = now_ms;
         }
         osal_msleep(ECG_SLE_SAMPLE_MS);

@@ -1,0 +1,39 @@
+menu "EMQX Telemetry Configuration"
+
+config SAMPLE_SUPPORT_EMQX_TELEMETRY
+    bool
+    prompt "Support shared EMQX telemetry state."
+    default n
+    depends on ENABLE_MYDEMO_SAMPLE
+    help
+        Enable shared telemetry state used by ECG, SpO2 and EMQX publishing samples.
+
+config SAMPLE_SUPPORT_EMQX_TELEMETRY_PUBLISHER
+    bool
+    prompt "Publish telemetry to EMQX over MQTT TLS."
+    default n
+    depends on SAMPLE_SUPPORT_EMQX_TELEMETRY
+    help
+        Connect Wi-Fi and publish latest telemetry JSON to EMQX topic hispark/bed01/telemetry.
+
+if SAMPLE_SUPPORT_EMQX_TELEMETRY_PUBLISHER
+
+config WIFI_SSID
+    string "Set WIFI SSID for EMQX telemetry"
+    default "my_softAP"
+
+config WIFI_PWD
+    string "Set WIFI password for EMQX telemetry"
+    default "my_password"
+
+
+config EMQX_MQTT_USERNAME
+    string "Set EMQX MQTT username"
+    default "ws63_server"
+
+config EMQX_MQTT_PASSWORD
+    string "Set EMQX MQTT password"
+    default "123456"
+endif
+
+endmenu

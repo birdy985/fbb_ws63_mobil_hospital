@@ -32,13 +32,22 @@ if(DEFINED CONFIG_SAMPLE_SUPPORT_ADC)
     add_subdirectory_if_exist(8_adc)
 endif()
 
+if(DEFINED CONFIG_SAMPLE_SUPPORT_IIC)
+    add_subdirectory_if_exist(10_iic)
+endif()
+
+if(DEFINED CONFIG_SAMPLE_SUPPORT_EMQX_TELEMETRY)
+    add_subdirectory_if_exist(15_emqx_telemetry)
+endif()
+
 if(DEFINED CONFIG_SAMPLE_SUPPORT_AD8232_ADC)
     add_subdirectory_if_exist(9_ad8232_adc)
 endif()
 
-if(DEFINED CONFIG_SAMPLE_SUPPORT_SPO2_SENSOR)
+if(DEFINED CONFIG_SAMPLE_SUPPORT_SPO2_SENSOR AND NOT DEFINED CONFIG_SAMPLE_SUPPORT_AD8232_SLE_CLIENT)
     add_subdirectory_if_exist(14_spo2_sensor)
 endif()
+
 if(DEFINED CONFIG_SAMPLE_SUPPORT_WIFI)
     add_subdirectory_if_exist(11_wifi)
 endif()
@@ -51,4 +60,5 @@ endif()
         
 # 关键：将下层收集的 SOURCES 变量传递给父级作用域
 set(SOURCES "${SOURCES}" PARENT_SCOPE)
+set(PUBLIC_HEADER "${PUBLIC_HEADER}" PARENT_SCOPE)
 

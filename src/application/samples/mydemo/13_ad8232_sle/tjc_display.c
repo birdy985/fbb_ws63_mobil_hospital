@@ -16,10 +16,10 @@
 #define TJC_WAVEFORM_OBJ            "s0"
 #define TJC_WAVEFORM_CH             0
 #define TJC_BPM_OBJ                 "t3"
-#define TJC_WAVE_MIN                20
-#define TJC_WAVE_MAX                220
-#define TJC_DISPLAY_MV_MIN          (-1200)
-#define TJC_DISPLAY_MV_MAX          1200
+#define TJC_WAVE_MIN                10
+#define TJC_WAVE_MAX                245
+#define TJC_DISPLAY_MV_MIN          (-180)
+#define TJC_DISPLAY_MV_MAX          180
 #define TJC_UART_WRITE_TIMEOUT_MS    2
 
 static uint8_t g_tjc_uart_rx_buf[TJC_UART_RX_BUFFER_SIZE];

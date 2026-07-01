@@ -64,6 +64,16 @@ config SAMPLE_SUPPORT_ADC
     help
         This option means support ADC Sample.           
 
+config SAMPLE_SUPPORT_IIC
+    bool
+    prompt "Support IIC Sample."
+    default n
+    depends on ENABLE_MYDEMO_SAMPLE
+    help
+        This option means support IIC Sample.
+
+osource "application/samples/mydemo/15_emqx_telemetry/Kconfig"
+
 config SAMPLE_SUPPORT_AD8232_ADC
     bool
     prompt "Support AD8232 ECG ADC Sample."

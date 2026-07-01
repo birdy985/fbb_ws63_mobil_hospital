@@ -19,17 +19,17 @@ set(SOURCES_LIST
     ${CMAKE_CURRENT_SOURCE_DIR}/ecg_sle_packet.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../9_ad8232_adc/ad8232_bsp.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../9_ad8232_adc/ecg_processor.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../14_spo2_sensor/max30102_bsp.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../14_spo2_sensor/spo2_processor.c
     ${CMAKE_CURRENT_SOURCE_DIR}/main.c
 )
 set(HEADER_LIST
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/sle_uart_client
     ${CMAKE_CURRENT_SOURCE_DIR}/../9_ad8232_adc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../14_spo2_sensor
 )
 endif()
 
 set(SOURCES "${SOURCES}" ${SOURCES_LIST} PARENT_SCOPE)
 set(PUBLIC_HEADER "${PUBLIC_HEADER}" ${HEADER_LIST} PARENT_SCOPE)
-
-
-

@@ -84,6 +84,7 @@ target = {
             'radar_at',
             'radar_ai',
             "cjson",
+            "mqtt",
             'xo_trim_port',
             "coap",
             "sle_netdev", "chba_at",
@@ -487,3 +488,4 @@ target_copy = {
 target_group = {
 
 }
+
