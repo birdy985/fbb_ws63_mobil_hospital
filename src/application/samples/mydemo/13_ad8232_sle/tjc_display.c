@@ -12,10 +12,16 @@
 #define TJC_UART_RX_PIN              GPIO_07
 #define TJC_UART_BAUDRATE            115200
 #define TJC_UART_RX_BUFFER_SIZE      64
-#define TJC_CMD_BUFFER_SIZE          40
+#define TJC_CMD_BUFFER_SIZE          128
 #define TJC_WAVEFORM_OBJ            "s0"
 #define TJC_WAVEFORM_CH             0
 #define TJC_BPM_OBJ                 "t3"
+#define TJC_PATIENT_NAME_OBJ        "t7"
+#define TJC_PATIENT_RECORD_OBJ      "t8"
+#define TJC_PATIENT_GENDER_OBJ      "t9"
+#define TJC_PATIENT_AGE_OBJ         "t10"
+#define TJC_PATIENT_PHONE_OBJ       "t11"
+#define TJC_PATIENT_NOTE_OBJ        "t12"
 #define TJC_WAVE_MIN                10
 #define TJC_WAVE_MAX                245
 #define TJC_DISPLAY_MV_MIN          (-180)
@@ -52,6 +58,46 @@ static void tjc_send_text_cmd(const char *cmd)
 
     tjc_uart_write_bytes((const uint8_t *)cmd, (uint32_t)strlen(cmd));
     tjc_send_end();
+}
+
+static void tjc_copy_safe_text(char *dst, size_t dst_len, const char *src)
+{
+    size_t out = 0;
+
+    if ((dst == NULL) || (dst_len == 0)) {
+        return;
+    }
+    if (src == NULL) {
+        dst[0] = '\0';
+        return;
+    }
+
+    while ((src[0] != '\0') && (out + 1 < dst_len)) {
+        char ch = *src++;
+        if ((ch == '"') || (ch == '\\') || (ch == '\r') || (ch == '\n')) {
+            ch = ' ';
+        }
+        dst[out++] = ch;
+    }
+    dst[out] = '\0';
+}
+
+static void tjc_display_send_text_value(const char *obj, const char *value)
+{
+    char safe_value[80];
+    char cmd[TJC_CMD_BUFFER_SIZE];
+    int len;
+
+    if (obj == NULL) {
+        return;
+    }
+
+    tjc_copy_safe_text(safe_value, sizeof(safe_value), value);
+    len = snprintf(cmd, sizeof(cmd), "%s.txt=\"%s\"", obj, safe_value);
+    if ((len <= 0) || (len >= (int)sizeof(cmd))) {
+        return;
+    }
+    tjc_send_text_cmd(cmd);
 }
 
 static uint8_t tjc_map_display_mv(int16_t display_mv)
@@ -133,6 +179,17 @@ void tjc_display_send_bpm(uint16_t bpm)
         return;
     }
     tjc_send_text_cmd(cmd);
+}
+
+void tjc_display_send_patient_info(const char *name, const char *record_no, const char *gender,
+    const char *age, const char *phone, const char *note)
+{
+    tjc_display_send_text_value(TJC_PATIENT_NAME_OBJ, name);
+    tjc_display_send_text_value(TJC_PATIENT_RECORD_OBJ, record_no);
+    tjc_display_send_text_value(TJC_PATIENT_GENDER_OBJ, gender);
+    tjc_display_send_text_value(TJC_PATIENT_AGE_OBJ, age);
+    tjc_display_send_text_value(TJC_PATIENT_PHONE_OBJ, phone);
+    tjc_display_send_text_value(TJC_PATIENT_NOTE_OBJ, note);
 }
 
 void tjc_display_send_test_pattern(void)
