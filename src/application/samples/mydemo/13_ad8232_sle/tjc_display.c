@@ -12,7 +12,7 @@
 #define TJC_UART_RX_PIN              GPIO_07
 #define TJC_UART_BAUDRATE            115200
 #define TJC_UART_RX_BUFFER_SIZE      64
-#define TJC_CMD_BUFFER_SIZE          96
+#define TJC_CMD_BUFFER_SIZE          128
 #define TJC_WAVEFORM_OBJ            "s0"
 #define TJC_WAVEFORM_CH             0
 #define TJC_ECG_HR_OBJ              "t0"
@@ -232,6 +232,8 @@ static void tjc_send_text_spo2_x10(const char *obj, int32_t spo2_x10)
 
 static void tjc_copy_cache_text(char *dst, uint32_t dst_len, const char *src)
 {
+    uint32_t out = 0;
+
     if ((dst == NULL) || (dst_len == 0)) {
         return;
     }
@@ -241,7 +243,14 @@ static void tjc_copy_cache_text(char *dst, uint32_t dst_len, const char *src)
         return;
     }
 
-    (void)snprintf(dst, dst_len, "%s", src);
+    while ((*src != '\0') && (out + 1U < dst_len)) {
+        char ch = *src++;
+        if ((ch == '"') || (ch == '\\') || (ch == '\r') || (ch == '\n')) {
+            ch = ' ';
+        }
+        dst[out++] = ch;
+    }
+    dst[out] = '\0';
 }
 
 static void tjc_update_cached_text(char *cache, uint32_t cache_len, const char *obj, const char *value)
@@ -287,6 +296,38 @@ void tjc_display_set_patient_info(const tjc_display_patient_info_t *patient)
     }
     tjc_update_cached_text(g_tjc_cache.phone, sizeof(g_tjc_cache.phone), TJC_PHONE_OBJ, patient->phone);
     tjc_update_cached_text(g_tjc_cache.remark, sizeof(g_tjc_cache.remark), TJC_REMARK_OBJ, patient->remark);
+}
+
+static uint8_t tjc_parse_age_text(const char *age)
+{
+    uint32_t value = 0;
+
+    if (age == NULL) {
+        return 0;
+    }
+    while ((*age >= '0') && (*age <= '9')) {
+        value = (value * 10U) + (uint32_t)(*age - '0');
+        if (value > 130U) {
+            return 0;
+        }
+        age++;
+    }
+    return (uint8_t)value;
+}
+
+void tjc_display_send_patient_info(const char *name, const char *record_no, const char *gender,
+    const char *age, const char *phone, const char *note)
+{
+    tjc_display_patient_info_t patient = {
+        .name = name,
+        .case_no = record_no,
+        .gender = gender,
+        .age = tjc_parse_age_text(age),
+        .phone = phone,
+        .remark = note,
+    };
+
+    tjc_display_set_patient_info(&patient);
 }
 
 void tjc_display_update_vitals(const tjc_display_vitals_t *vitals)
