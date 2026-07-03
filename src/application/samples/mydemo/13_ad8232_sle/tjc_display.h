@@ -8,7 +8,7 @@
 #include "ecg_sle_packet.h"
 #include "errcode.h"
 
-#define TJC_DISPLAY_TEXT_MAX_LEN 80
+#define TJC_DISPLAY_TEXT_MAX_LEN 160
 
 typedef struct {
     const char *name;

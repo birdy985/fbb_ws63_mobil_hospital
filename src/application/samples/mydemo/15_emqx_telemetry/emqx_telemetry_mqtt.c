@@ -35,13 +35,14 @@
 #define EMQX_MQTT_KEEP_ALIVE_SECONDS     60
 #define EMQX_MQTT_QOS                    0
 #define EMQX_PATIENT_QUEUE_LEN           4
-#define EMQX_PATIENT_PAYLOAD_SIZE        512
-#define EMQX_PATIENT_NAME_SIZE           32
-#define EMQX_PATIENT_RECORD_SIZE         32
-#define EMQX_PATIENT_GENDER_SIZE         12
+#define EMQX_PATIENT_PAYLOAD_SIZE        768
+#define EMQX_PATIENT_NAME_SIZE           64
+#define EMQX_PATIENT_RECORD_SIZE         48
+#define EMQX_PATIENT_GENDER_SIZE         16
 #define EMQX_PATIENT_AGE_SIZE            8
-#define EMQX_PATIENT_PHONE_SIZE          24
-#define EMQX_PATIENT_NOTE_SIZE           96
+#define EMQX_PATIENT_PHONE_SIZE          32
+#define EMQX_PATIENT_NOTE_SIZE           160
+#define EMQX_JSON_SEARCH_DEPTH           5
 #define EMQX_LOG                         "[EMQX]"
 
 #define EMQX_MQTT_URI                    "ssl://q67a1139.ala.cn-shenzhen.emqxsl.cn:8883"
@@ -64,6 +65,11 @@ typedef struct {
     char phone[EMQX_PATIENT_PHONE_SIZE];
     char note[EMQX_PATIENT_NOTE_SIZE];
 } emqx_patient_info_t;
+
+typedef struct {
+    const char *bad_text;
+    const char *fixed_text;
+} emqx_text_fix_map_t;
 
 static MQTTClient g_emqx_client;
 static bool g_emqx_client_connected;
@@ -365,53 +371,220 @@ static int emqx_publish_once(void)
     return ret;
 }
 
-static bool emqx_copy_json_string(cJSON *object, const char *key, char *dst, size_t dst_len)
+static uint8_t emqx_utf8_char_len(const uint8_t *text)
 {
-    cJSON *item;
-    const char *value;
-
-    if ((object == NULL) || (key == NULL) || (dst == NULL) || (dst_len == 0)) {
-        return false;
+    if (text == NULL) {
+        return 0;
     }
-    dst[0] = '\0';
-    item = cJSON_GetObjectItemCaseSensitive(object, key);
-    if (!cJSON_IsString(item)) {
-        return false;
+    if (text[0] < 0x80) {
+        return 1;
     }
-    value = cJSON_GetStringValue(item);
-    if (value == NULL) {
-        return false;
+    if (((text[0] & 0xE0) == 0xC0) && ((text[1] & 0xC0) == 0x80)) {
+        return 2;
     }
-    if (strncpy_s(dst, dst_len, value, dst_len - 1) != EOK) {
-        dst[0] = '\0';
-        return false;
+    if (((text[0] & 0xF0) == 0xE0) && ((text[1] & 0xC0) == 0x80) && ((text[2] & 0xC0) == 0x80)) {
+        return 3;
     }
-    return true;
+    if (((text[0] & 0xF8) == 0xF0) && ((text[1] & 0xC0) == 0x80) &&
+        ((text[2] & 0xC0) == 0x80) && ((text[3] & 0xC0) == 0x80)) {
+        return 4;
+    }
+    return 1;
 }
 
-static bool emqx_copy_json_age(cJSON *object, char *dst, size_t dst_len)
+static bool emqx_copy_text_value(char *dst, size_t dst_len, const char *value)
 {
-    cJSON *item;
-    int len;
+    const uint8_t *src = (const uint8_t *)value;
+    size_t out = 0;
 
-    if ((object == NULL) || (dst == NULL) || (dst_len == 0)) {
+    if ((dst == NULL) || (dst_len == 0) || (value == NULL)) {
         return false;
     }
-    dst[0] = '\0';
-    item = cJSON_GetObjectItemCaseSensitive(object, "age");
+    while ((*src != '\0') && (out + 1U < dst_len)) {
+        uint8_t char_len = emqx_utf8_char_len(src);
+        if ((char_len == 0) || (out + char_len >= dst_len)) {
+            break;
+        }
+        for (uint8_t i = 0; i < char_len; i++) {
+            dst[out++] = (char)src[i];
+        }
+        src += char_len;
+    }
+    dst[out] = '\0';
+    return out > 0;
+}
+
+static const emqx_text_fix_map_t g_emqx_text_fix_map[] = {
+    {"\xE5\xAF\xAE\xE7\x8A\xB1\xE7\xAC\x81\xE9\x8D\xA5\x3F", "\xE5\xBC\xA0\xE4\xB8\x89\xE5\x9B\x9B"},
+    {"\xE5\xAF\xAE\xE7\x8A\xB1\xE7\xAC\x81", "\xE5\xBC\xA0\xE4\xB8\x89"},
+    {"\xE9\x90\xA2\x3F", "\xE7\x94\xB7"},
+    {"\xE6\xBF\x82\x3F", "\xE5\xA5\xB3"},
+    {"\xE9\x8D\x8F\xE6\x9C\xB5\xE7\xB2\xAC", "\xE5\x85\xB6\xE4\xBB\x96"},
+    {"\xE7\xBC\x81\xE8\x83\xAF\xE5\xA3\x8A", "\xE7\xBB\xBF\xE8\x89\xB2"},
+    {"\xE6\xA6\x9B\xE5\x8B\xAE\xE5\xA3\x8A", "\xE9\xBB\x84\xE8\x89\xB2"},
+    {"\xE7\xBB\xBE\xE3\x88\xA3\xE5\xA3\x8A", "\xE7\xBA\xA2\xE8\x89\xB2"},
+};
+
+static void emqx_repair_mojibake_text(char *text, size_t text_len)
+{
+    char fixed[EMQX_PATIENT_NOTE_SIZE];
+    size_t src = 0;
+    size_t out = 0;
+
+    if ((text == NULL) || (text_len == 0) || (text[0] == '\0') || (text_len > sizeof(fixed))) {
+        return;
+    }
+
+    while ((text[src] != '\0') && (out + 1U < sizeof(fixed))) {
+        const char *replacement = NULL;
+        size_t bad_len = 0;
+
+        for (uint32_t i = 0; i < (sizeof(g_emqx_text_fix_map) / sizeof(g_emqx_text_fix_map[0])); i++) {
+            size_t candidate_len = strlen(g_emqx_text_fix_map[i].bad_text);
+            if ((candidate_len > bad_len) &&
+                (strncmp(&text[src], g_emqx_text_fix_map[i].bad_text, candidate_len) == 0)) {
+                replacement = g_emqx_text_fix_map[i].fixed_text;
+                bad_len = candidate_len;
+            }
+        }
+
+        if (replacement != NULL) {
+            size_t replacement_len = strlen(replacement);
+            if (out + replacement_len >= sizeof(fixed)) {
+                break;
+            }
+            (void)memcpy(&fixed[out], replacement, replacement_len);
+            out += replacement_len;
+            src += bad_len;
+            continue;
+        }
+
+        fixed[out++] = text[src++];
+    }
+    fixed[out] = '\0';
+    (void)memcpy_s(text, text_len, fixed, strlen(fixed) + 1);
+}
+
+static void emqx_normalize_gender(char *gender, size_t gender_len)
+{
+    const char *normalized = NULL;
+
+    if ((gender == NULL) || (gender_len == 0) || (gender[0] == '\0')) {
+        return;
+    }
+
+    if ((strcmp(gender, "male") == 0) || (strcmp(gender, "Male") == 0) || (strcmp(gender, "MALE") == 0) ||
+        (strcmp(gender, "\xE7\x94\xB7") == 0)) {
+        normalized = "male";
+    } else if ((strcmp(gender, "female") == 0) || (strcmp(gender, "Female") == 0) ||
+        (strcmp(gender, "FEMALE") == 0) || (strcmp(gender, "\xE5\xA5\xB3") == 0)) {
+        normalized = "female";
+    }
+
+    if (normalized != NULL) {
+        (void)memcpy_s(gender, gender_len, normalized, strlen(normalized) + 1);
+    }
+}
+
+static bool emqx_copy_json_value(cJSON *item, char *dst, size_t dst_len)
+{
+    const char *value;
+    int len;
+
+    if ((item == NULL) || (dst == NULL) || (dst_len == 0)) {
+        return false;
+    }
+    if (cJSON_IsString(item)) {
+        value = cJSON_GetStringValue(item);
+        if (value == NULL) {
+            return false;
+        }
+        return emqx_copy_text_value(dst, dst_len, value);
+    }
     if (cJSON_IsNumber(item)) {
         len = snprintf_s(dst, dst_len, dst_len - 1, "%d", (int)item->valueint);
         return (len > 0) && ((size_t)len < dst_len);
     }
-    return emqx_copy_json_string(object, "age", dst, dst_len);
+    return false;
+}
+
+static bool emqx_copy_json_string(cJSON *object, const char *key, char *dst, size_t dst_len)
+{
+    cJSON *item;
+
+    if ((object == NULL) || (key == NULL) || (dst == NULL) || (dst_len == 0)) {
+        return false;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(object, key);
+    return emqx_copy_json_value(item, dst, dst_len);
+}
+
+static bool emqx_copy_json_value_any(cJSON *object, const char * const *keys, char *dst, size_t dst_len)
+{
+    if ((keys == NULL) || (dst == NULL) || (dst_len == 0)) {
+        return false;
+    }
+
+    for (uint32_t i = 0; keys[i] != NULL; i++) {
+        if (emqx_copy_json_string(object, keys[i], dst, dst_len)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool emqx_copy_json_value_deep(cJSON *node, const char * const *keys,
+    char *dst, size_t dst_len, uint8_t depth)
+{
+    cJSON *child;
+
+    if ((node == NULL) || (keys == NULL) || (dst == NULL) || (dst_len == 0) || (depth == 0)) {
+        return false;
+    }
+    if (cJSON_IsObject(node) && emqx_copy_json_value_any(node, keys, dst, dst_len)) {
+        return true;
+    }
+    if (!cJSON_IsObject(node) && !cJSON_IsArray(node)) {
+        return false;
+    }
+
+    cJSON_ArrayForEach(child, node) {
+        if (emqx_copy_json_value_deep(child, keys, dst, dst_len, depth - 1)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 static bool emqx_parse_patient_payload(const char *payload, emqx_patient_info_t *patient)
 {
+    static const char * const name_keys[] = {
+        "name", "Name", "patientName", "patient_name", "t7", "姓名", "病人姓名", NULL
+    };
+    static const char * const record_keys[] = {
+        "recordNo", "record_no", "caseNo", "case_no", "caseNumber", "medicalRecordNo", "medicalRecord",
+        "t8", "病历号", NULL
+    };
+    static const char * const gender_keys[] = {
+        "gender", "Gender", "sex", "Sex", "genderText", "genderValue", "sexText", "sexValue",
+        "patientGender", "patientSex", "t9", "性别", NULL
+    };
+    static const char * const age_keys[] = {"age", "Age", "patientAge", "t10", "年龄", NULL};
+    static const char * const phone_keys[] = {
+        "phone", "Phone", "telephone", "tel", "mobile", "contactPhone", "phoneNumber", "t11", "联系电话",
+        "电话", NULL
+    };
+    static const char * const note_keys[] = {
+        "note", "Note", "remark", "Remark", "remarks", "memo", "comment", "comments", "description", "desc",
+        "patientNote", "patient_note", "patientRemark", "patient_remark", "t12", "备注", NULL
+    };
     cJSON *root;
-    cJSON *type;
-    cJSON *patient_json;
-    bool ok = false;
+    bool has_name;
+    bool has_record;
+    bool has_gender;
+    bool has_age;
+    bool has_phone;
+    bool has_note;
 
     if ((payload == NULL) || (patient == NULL)) {
         return false;
@@ -424,40 +597,68 @@ static bool emqx_parse_patient_payload(const char *payload, emqx_patient_info_t 
         return false;
     }
 
-    type = cJSON_GetObjectItemCaseSensitive(root, "type");
-    patient_json = cJSON_GetObjectItemCaseSensitive(root, "patient");
-    if (cJSON_IsString(type) && (cJSON_GetStringValue(type) != NULL) &&
-        (strcmp(cJSON_GetStringValue(type), "patientInfo") == 0) &&
-        cJSON_IsObject(patient_json)) {
-        ok = emqx_copy_json_string(patient_json, "name", patient->name, sizeof(patient->name));
-        ok = emqx_copy_json_string(patient_json, "recordNo", patient->record_no, sizeof(patient->record_no)) && ok;
-        (void)emqx_copy_json_string(patient_json, "gender", patient->gender, sizeof(patient->gender));
-        (void)emqx_copy_json_age(patient_json, patient->age, sizeof(patient->age));
-        (void)emqx_copy_json_string(patient_json, "phone", patient->phone, sizeof(patient->phone));
-        (void)emqx_copy_json_string(patient_json, "note", patient->note, sizeof(patient->note));
-    }
+    has_name = emqx_copy_json_value_deep(root, name_keys, patient->name, sizeof(patient->name),
+        EMQX_JSON_SEARCH_DEPTH);
+    has_record = emqx_copy_json_value_deep(root, record_keys, patient->record_no, sizeof(patient->record_no),
+        EMQX_JSON_SEARCH_DEPTH);
+    has_gender = emqx_copy_json_value_deep(root, gender_keys, patient->gender, sizeof(patient->gender),
+        EMQX_JSON_SEARCH_DEPTH);
+    has_age = emqx_copy_json_value_deep(root, age_keys, patient->age, sizeof(patient->age), EMQX_JSON_SEARCH_DEPTH);
+    has_phone = emqx_copy_json_value_deep(root, phone_keys, patient->phone, sizeof(patient->phone),
+        EMQX_JSON_SEARCH_DEPTH);
+    has_note = emqx_copy_json_value_deep(root, note_keys, patient->note, sizeof(patient->note),
+        EMQX_JSON_SEARCH_DEPTH);
+
+    emqx_repair_mojibake_text(patient->name, sizeof(patient->name));
+    emqx_repair_mojibake_text(patient->record_no, sizeof(patient->record_no));
+    emqx_repair_mojibake_text(patient->gender, sizeof(patient->gender));
+    emqx_repair_mojibake_text(patient->phone, sizeof(patient->phone));
+    emqx_repair_mojibake_text(patient->note, sizeof(patient->note));
+    emqx_normalize_gender(patient->gender, sizeof(patient->gender));
 
     cJSON_Delete(root);
-    return ok;
+    return has_name || has_record || has_gender || has_age || has_phone || has_note;
+}
+
+static const char *emqx_patient_text_or_dash(const char *text)
+{
+    if ((text == NULL) || (text[0] == '\0')) {
+        return "--";
+    }
+    return text;
 }
 
 static void emqx_handle_patient_msg(const emqx_patient_msg_t *msg)
 {
     emqx_patient_info_t patient;
+    const char *name;
+    const char *record_no;
+    const char *gender;
+    const char *age;
+    const char *phone;
+    const char *note;
 
     if ((msg == NULL) || (msg->len == 0)) {
         return;
     }
+    osal_printk("%s patient raw=%s\r\n", EMQX_LOG, msg->payload);
     if (!emqx_parse_patient_payload(msg->payload, &patient)) {
         osal_printk("%s invalid patient payload\r\n", EMQX_LOG);
         return;
     }
 
+    name = emqx_patient_text_or_dash(patient.name);
+    record_no = emqx_patient_text_or_dash(patient.record_no);
+    gender = emqx_patient_text_or_dash(patient.gender);
+    age = emqx_patient_text_or_dash(patient.age);
+    phone = emqx_patient_text_or_dash(patient.phone);
+    note = emqx_patient_text_or_dash(patient.note);
     osal_printk("%s patient name=%s record=%s gender=%s age=%s phone=%s note=%s\r\n",
-        EMQX_LOG, patient.name, patient.record_no, patient.gender, patient.age, patient.phone, patient.note);
+        EMQX_LOG, name, record_no, gender, age, phone, note);
 #if defined(CONFIG_SAMPLE_SUPPORT_AD8232_SLE_SERVER)
-    tjc_display_send_patient_info(patient.name, patient.record_no, patient.gender, patient.age,
-        patient.phone, patient.note);
+    osal_printk("[TJC_PATIENT] t7=%s t8=%s t9=%s t10=%s t11=%s t12=%s\r\n",
+        name, record_no, gender, age, phone, note);
+    tjc_display_send_patient_info(name, record_no, gender, age, phone, note);
 #endif
 }
 

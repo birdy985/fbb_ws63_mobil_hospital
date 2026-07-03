@@ -12,7 +12,7 @@
 #define TJC_UART_RX_PIN              GPIO_07
 #define TJC_UART_BAUDRATE            115200
 #define TJC_UART_RX_BUFFER_SIZE      64
-#define TJC_CMD_BUFFER_SIZE          128
+#define TJC_CMD_BUFFER_SIZE          384
 #define TJC_WAVEFORM_OBJ            "s0"
 #define TJC_WAVEFORM_CH             0
 #define TJC_ECG_HR_OBJ              "t0"
@@ -32,12 +32,17 @@
 #define TJC_WAVE_MAX                245
 #define TJC_DISPLAY_MV_MIN          (-180)
 #define TJC_DISPLAY_MV_MAX          180
-#define TJC_UART_WRITE_TIMEOUT_MS    2
+#define TJC_UART_WRITE_TIMEOUT_MS    100
+#define TJC_PATIENT_CMD_DELAY_MS     30
+#define TJC_PATIENT_SEND_REPEAT      2
 #define TJC_INVALID_U16             0xFFFF
 #define TJC_INVALID_I16             ((int16_t)0x7FFF)
 #define TJC_INVALID_I32             ((int32_t)0x7FFFFFFF)
 
 static uint8_t g_tjc_uart_rx_buf[TJC_UART_RX_BUFFER_SIZE];
+static osal_mutex g_tjc_uart_lock;
+static uint8_t g_tjc_uart_lock_ready;
+static volatile uint8_t g_tjc_patient_update_busy;
 
 typedef struct {
     uint16_t ecg_hr;
@@ -72,27 +77,42 @@ static uart_buffer_config_t g_tjc_uart_buffer_config = {
 
 static void tjc_uart_write_bytes(const uint8_t *data, uint32_t len)
 {
+    int32_t ret;
+
     if (data == NULL || len == 0) {
         return;
     }
 
-    (void)uapi_uart_write(TJC_UART_BUS, data, len, TJC_UART_WRITE_TIMEOUT_MS);
-}
-
-static void tjc_send_end(void)
-{
-    static const uint8_t end_cmd[3] = {0xFF, 0xFF, 0xFF};
-    tjc_uart_write_bytes(end_cmd, sizeof(end_cmd));
+    if (g_tjc_uart_lock_ready != 0) {
+        (void)osal_mutex_lock(&g_tjc_uart_lock);
+    }
+    ret = uapi_uart_write(TJC_UART_BUS, data, len, TJC_UART_WRITE_TIMEOUT_MS);
+    if (ret != (int32_t)len) {
+        osal_printk("[TJC] uart write short ret=%ld len=%lu\r\n", (long)ret, (unsigned long)len);
+    }
+    if (g_tjc_uart_lock_ready != 0) {
+        osal_mutex_unlock(&g_tjc_uart_lock);
+    }
 }
 
 static void tjc_send_text_cmd(const char *cmd)
 {
+    uint8_t frame[TJC_CMD_BUFFER_SIZE + 3];
+    uint32_t len;
+
     if (cmd == NULL) {
         return;
     }
 
-    tjc_uart_write_bytes((const uint8_t *)cmd, (uint32_t)strlen(cmd));
-    tjc_send_end();
+    len = (uint32_t)strlen(cmd);
+    if (len + 3U > sizeof(frame)) {
+        return;
+    }
+    (void)memcpy(frame, cmd, len);
+    frame[len++] = 0xFF;
+    frame[len++] = 0xFF;
+    frame[len++] = 0xFF;
+    tjc_uart_write_bytes(frame, len);
 }
 
 static uint8_t tjc_map_display_mv(int16_t display_mv)
@@ -128,6 +148,12 @@ errcode_t tjc_display_init(void)
 #if defined(CONFIG_PINCTRL_SUPPORT_IE)
     uapi_pin_set_ie(TJC_UART_RX_PIN, PIN_IE_1);
 #endif
+    if (g_tjc_uart_lock_ready == 0) {
+        if (osal_mutex_init(&g_tjc_uart_lock) == OSAL_SUCCESS) {
+            g_tjc_uart_lock_ready = 1;
+        }
+    }
+
     uapi_pin_set_mode(TJC_UART_TX_PIN, PIN_MODE_2);
     uapi_pin_set_mode(TJC_UART_RX_PIN, PIN_MODE_2);
 
@@ -167,7 +193,7 @@ void tjc_display_send_sample(const ecg_monitor_sample_t *sample)
     int len;
     uint8_t wave;
 
-    if (sample == NULL) {
+    if ((sample == NULL) || (g_tjc_patient_update_busy != 0)) {
         return;
     }
 
@@ -269,6 +295,35 @@ static void tjc_update_cached_text(char *cache, uint32_t cache_len, const char *
     tjc_send_text_value(obj, cache);
 }
 
+static void tjc_force_cached_text(char *cache, uint32_t cache_len, const char *obj, const char *value)
+{
+    const char *text = (value == NULL) ? "" : value;
+
+    if ((cache == NULL) || (cache_len == 0)) {
+        return;
+    }
+
+    tjc_copy_cache_text(cache, cache_len, text);
+    tjc_send_text_value(obj, cache);
+}
+
+static void tjc_send_patient_fields_once(const char *name, const char *record_no, const char *gender,
+    const char *age, const char *phone, const char *note)
+{
+    tjc_force_cached_text(g_tjc_cache.name, sizeof(g_tjc_cache.name), TJC_PATIENT_NAME_OBJ, name);
+    osal_msleep(TJC_PATIENT_CMD_DELAY_MS);
+    tjc_force_cached_text(g_tjc_cache.case_no, sizeof(g_tjc_cache.case_no), TJC_CASE_NO_OBJ, record_no);
+    osal_msleep(TJC_PATIENT_CMD_DELAY_MS);
+    tjc_force_cached_text(g_tjc_cache.gender, sizeof(g_tjc_cache.gender), TJC_GENDER_OBJ, gender);
+    osal_msleep(TJC_PATIENT_CMD_DELAY_MS);
+    tjc_force_cached_text(g_tjc_cache.age, sizeof(g_tjc_cache.age), TJC_AGE_OBJ, age);
+    osal_msleep(TJC_PATIENT_CMD_DELAY_MS);
+    tjc_force_cached_text(g_tjc_cache.phone, sizeof(g_tjc_cache.phone), TJC_PHONE_OBJ, phone);
+    osal_msleep(TJC_PATIENT_CMD_DELAY_MS);
+    tjc_force_cached_text(g_tjc_cache.remark, sizeof(g_tjc_cache.remark), TJC_REMARK_OBJ, note);
+    osal_msleep(TJC_PATIENT_CMD_DELAY_MS);
+}
+
 void tjc_display_send_bpm(uint16_t bpm)
 {
     if (g_tjc_cache.spo2_hr == bpm) {
@@ -290,8 +345,13 @@ void tjc_display_set_patient_info(const tjc_display_patient_info_t *patient)
     tjc_update_cached_text(g_tjc_cache.name, sizeof(g_tjc_cache.name), TJC_PATIENT_NAME_OBJ, patient->name);
     tjc_update_cached_text(g_tjc_cache.case_no, sizeof(g_tjc_cache.case_no), TJC_CASE_NO_OBJ, patient->case_no);
     tjc_update_cached_text(g_tjc_cache.gender, sizeof(g_tjc_cache.gender), TJC_GENDER_OBJ, patient->gender);
-    len = snprintf(age_text, sizeof(age_text), "%u", (unsigned int)patient->age);
-    if (len > 0 && len < (int)sizeof(age_text)) {
+    if (patient->age == 0) {
+        tjc_update_cached_text(g_tjc_cache.age, sizeof(g_tjc_cache.age), TJC_AGE_OBJ, "--");
+    } else {
+        len = snprintf(age_text, sizeof(age_text), "%u", (unsigned int)patient->age);
+        if (len <= 0 || len >= (int)sizeof(age_text)) {
+            age_text[0] = '\0';
+        }
         tjc_update_cached_text(g_tjc_cache.age, sizeof(g_tjc_cache.age), TJC_AGE_OBJ, age_text);
     }
     tjc_update_cached_text(g_tjc_cache.phone, sizeof(g_tjc_cache.phone), TJC_PHONE_OBJ, patient->phone);
@@ -318,16 +378,18 @@ static uint8_t tjc_parse_age_text(const char *age)
 void tjc_display_send_patient_info(const char *name, const char *record_no, const char *gender,
     const char *age, const char *phone, const char *note)
 {
-    tjc_display_patient_info_t patient = {
-        .name = name,
-        .case_no = record_no,
-        .gender = gender,
-        .age = tjc_parse_age_text(age),
-        .phone = phone,
-        .remark = note,
-    };
+    uint8_t parsed_age = tjc_parse_age_text(age);
+    const char *age_text = age;
 
-    tjc_display_set_patient_info(&patient);
+    if (((age == NULL) || (age[0] == '\0')) && (parsed_age == 0)) {
+        age_text = "--";
+    }
+
+    g_tjc_patient_update_busy = 1;
+    for (uint8_t i = 0; i < TJC_PATIENT_SEND_REPEAT; i++) {
+        tjc_send_patient_fields_once(name, record_no, gender, age_text, phone, note);
+    }
+    g_tjc_patient_update_busy = 0;
 }
 
 void tjc_display_update_vitals(const tjc_display_vitals_t *vitals)
