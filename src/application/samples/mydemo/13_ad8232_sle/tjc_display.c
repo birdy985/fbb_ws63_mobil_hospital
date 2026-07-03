@@ -15,20 +15,55 @@
 #define TJC_CMD_BUFFER_SIZE          128
 #define TJC_WAVEFORM_OBJ            "s0"
 #define TJC_WAVEFORM_CH             0
+#define TJC_ECG_HR_OBJ              "t0"
+#define TJC_ECG_VALUE_OBJ           "t1"
+#define TJC_SPO2_OBJ                "t2"
 #define TJC_BPM_OBJ                 "t3"
+#define TJC_SYS_BP_OBJ              "t4"
+#define TJC_DIA_BP_OBJ              "t5"
+#define TJC_MICROCIRC_OBJ           "t6"
 #define TJC_PATIENT_NAME_OBJ        "t7"
-#define TJC_PATIENT_RECORD_OBJ      "t8"
-#define TJC_PATIENT_GENDER_OBJ      "t9"
-#define TJC_PATIENT_AGE_OBJ         "t10"
-#define TJC_PATIENT_PHONE_OBJ       "t11"
-#define TJC_PATIENT_NOTE_OBJ        "t12"
+#define TJC_CASE_NO_OBJ             "t8"
+#define TJC_GENDER_OBJ              "t9"
+#define TJC_AGE_OBJ                 "t10"
+#define TJC_PHONE_OBJ               "t11"
+#define TJC_REMARK_OBJ              "t12"
 #define TJC_WAVE_MIN                10
 #define TJC_WAVE_MAX                245
 #define TJC_DISPLAY_MV_MIN          (-180)
 #define TJC_DISPLAY_MV_MAX          180
 #define TJC_UART_WRITE_TIMEOUT_MS    2
+#define TJC_INVALID_U16             0xFFFF
+#define TJC_INVALID_I16             ((int16_t)0x7FFF)
+#define TJC_INVALID_I32             ((int32_t)0x7FFFFFFF)
 
 static uint8_t g_tjc_uart_rx_buf[TJC_UART_RX_BUFFER_SIZE];
+
+typedef struct {
+    uint16_t ecg_hr;
+    int16_t ecg_value;
+    int32_t spo2_x10;
+    uint16_t spo2_hr;
+    uint16_t systolic_bp;
+    uint16_t diastolic_bp;
+    uint16_t microcirculation;
+    char name[TJC_DISPLAY_TEXT_MAX_LEN];
+    char case_no[TJC_DISPLAY_TEXT_MAX_LEN];
+    char gender[TJC_DISPLAY_TEXT_MAX_LEN];
+    char age[TJC_DISPLAY_TEXT_MAX_LEN];
+    char phone[TJC_DISPLAY_TEXT_MAX_LEN];
+    char remark[TJC_DISPLAY_TEXT_MAX_LEN];
+} tjc_display_cache_t;
+
+static tjc_display_cache_t g_tjc_cache = {
+    .ecg_hr = TJC_INVALID_U16,
+    .ecg_value = TJC_INVALID_I16,
+    .spo2_x10 = TJC_INVALID_I32,
+    .spo2_hr = TJC_INVALID_U16,
+    .systolic_bp = TJC_INVALID_U16,
+    .diastolic_bp = TJC_INVALID_U16,
+    .microcirculation = TJC_INVALID_U16,
+};
 
 static uart_buffer_config_t g_tjc_uart_buffer_config = {
     .rx_buffer = g_tjc_uart_rx_buf,
@@ -58,46 +93,6 @@ static void tjc_send_text_cmd(const char *cmd)
 
     tjc_uart_write_bytes((const uint8_t *)cmd, (uint32_t)strlen(cmd));
     tjc_send_end();
-}
-
-static void tjc_copy_safe_text(char *dst, size_t dst_len, const char *src)
-{
-    size_t out = 0;
-
-    if ((dst == NULL) || (dst_len == 0)) {
-        return;
-    }
-    if (src == NULL) {
-        dst[0] = '\0';
-        return;
-    }
-
-    while ((src[0] != '\0') && (out + 1 < dst_len)) {
-        char ch = *src++;
-        if ((ch == '"') || (ch == '\\') || (ch == '\r') || (ch == '\n')) {
-            ch = ' ';
-        }
-        dst[out++] = ch;
-    }
-    dst[out] = '\0';
-}
-
-static void tjc_display_send_text_value(const char *obj, const char *value)
-{
-    char safe_value[80];
-    char cmd[TJC_CMD_BUFFER_SIZE];
-    int len;
-
-    if (obj == NULL) {
-        return;
-    }
-
-    tjc_copy_safe_text(safe_value, sizeof(safe_value), value);
-    len = snprintf(cmd, sizeof(cmd), "%s.txt=\"%s\"", obj, safe_value);
-    if ((len <= 0) || (len >= (int)sizeof(cmd))) {
-        return;
-    }
-    tjc_send_text_cmd(cmd);
 }
 
 static uint8_t tjc_map_display_mv(int16_t display_mv)
@@ -143,6 +138,20 @@ errcode_t tjc_display_init(void)
         return ret;
     }
 
+    g_tjc_cache.ecg_hr = TJC_INVALID_U16;
+    g_tjc_cache.ecg_value = TJC_INVALID_I16;
+    g_tjc_cache.spo2_x10 = TJC_INVALID_I32;
+    g_tjc_cache.spo2_hr = TJC_INVALID_U16;
+    g_tjc_cache.systolic_bp = TJC_INVALID_U16;
+    g_tjc_cache.diastolic_bp = TJC_INVALID_U16;
+    g_tjc_cache.microcirculation = TJC_INVALID_U16;
+    g_tjc_cache.name[0] = '\0';
+    g_tjc_cache.case_no[0] = '\0';
+    g_tjc_cache.gender[0] = '\0';
+    g_tjc_cache.age[0] = '\0';
+    g_tjc_cache.phone[0] = '\0';
+    g_tjc_cache.remark[0] = '\0';
+
     printf("[TJC] UART2 ready: TX=GPIO08, RX=GPIO07, baud=%u\r\n", (unsigned int)TJC_UART_BAUDRATE);
     return ERRCODE_SUCC;
 }
@@ -170,26 +179,232 @@ void tjc_display_send_sample(const ecg_monitor_sample_t *sample)
     tjc_send_text_cmd(cmd);
 }
 
-void tjc_display_send_bpm(uint16_t bpm)
+static void tjc_send_text_value(const char *obj, const char *text)
 {
     char cmd[TJC_CMD_BUFFER_SIZE];
-    int len = snprintf(cmd, sizeof(cmd), "%s.txt=\"%u\"", TJC_BPM_OBJ, (unsigned int)bpm);
+    int len;
 
+    if ((obj == NULL) || (text == NULL)) {
+        return;
+    }
+
+    len = snprintf(cmd, sizeof(cmd), "%s.txt=\"%s\"", obj, text);
     if (len <= 0 || len >= (int)sizeof(cmd)) {
         return;
     }
+    osal_printk("[TJC_TX] %s FF FF FF\r\n", cmd);
     tjc_send_text_cmd(cmd);
+}
+
+static void tjc_send_text_u16(const char *obj, uint16_t value)
+{
+    char text[16];
+    int len = snprintf(text, sizeof(text), "%u", (unsigned int)value);
+
+    if (len <= 0 || len >= (int)sizeof(text)) {
+        return;
+    }
+    tjc_send_text_value(obj, text);
+}
+
+static void tjc_send_text_i16(const char *obj, int16_t value)
+{
+    char text[16];
+    int len = snprintf(text, sizeof(text), "%d", (int)value);
+
+    if (len <= 0 || len >= (int)sizeof(text)) {
+        return;
+    }
+    tjc_send_text_value(obj, text);
+}
+
+static void tjc_send_text_spo2_x10(const char *obj, int32_t spo2_x10)
+{
+    char text[16];
+    int len = snprintf(text, sizeof(text), "%ld.%ld",
+        (long)(spo2_x10 / 10), (long)(spo2_x10 >= 0 ? spo2_x10 % 10 : -(spo2_x10 % 10)));
+
+    if (len <= 0 || len >= (int)sizeof(text)) {
+        return;
+    }
+    tjc_send_text_value(obj, text);
+}
+
+static void tjc_copy_cache_text(char *dst, uint32_t dst_len, const char *src)
+{
+    uint32_t out = 0;
+
+    if ((dst == NULL) || (dst_len == 0)) {
+        return;
+    }
+
+    if (src == NULL) {
+        dst[0] = '\0';
+        return;
+    }
+
+    while ((*src != '\0') && (out + 1U < dst_len)) {
+        char ch = *src++;
+        if ((ch == '"') || (ch == '\\') || (ch == '\r') || (ch == '\n')) {
+            ch = ' ';
+        }
+        dst[out++] = ch;
+    }
+    dst[out] = '\0';
+}
+
+static void tjc_update_cached_text(char *cache, uint32_t cache_len, const char *obj, const char *value)
+{
+    const char *text = (value == NULL) ? "" : value;
+
+    if ((cache == NULL) || (cache_len == 0)) {
+        return;
+    }
+
+    if (strncmp(cache, text, cache_len) == 0) {
+        return;
+    }
+
+    tjc_copy_cache_text(cache, cache_len, text);
+    tjc_send_text_value(obj, cache);
+}
+
+void tjc_display_send_bpm(uint16_t bpm)
+{
+    if (g_tjc_cache.spo2_hr == bpm) {
+        return;
+    }
+    g_tjc_cache.spo2_hr = bpm;
+    tjc_send_text_u16(TJC_BPM_OBJ, bpm);
+}
+
+void tjc_display_set_patient_info(const tjc_display_patient_info_t *patient)
+{
+    char age_text[8];
+    int len;
+
+    if (patient == NULL) {
+        return;
+    }
+
+    tjc_update_cached_text(g_tjc_cache.name, sizeof(g_tjc_cache.name), TJC_PATIENT_NAME_OBJ, patient->name);
+    tjc_update_cached_text(g_tjc_cache.case_no, sizeof(g_tjc_cache.case_no), TJC_CASE_NO_OBJ, patient->case_no);
+    tjc_update_cached_text(g_tjc_cache.gender, sizeof(g_tjc_cache.gender), TJC_GENDER_OBJ, patient->gender);
+    len = snprintf(age_text, sizeof(age_text), "%u", (unsigned int)patient->age);
+    if (len > 0 && len < (int)sizeof(age_text)) {
+        tjc_update_cached_text(g_tjc_cache.age, sizeof(g_tjc_cache.age), TJC_AGE_OBJ, age_text);
+    }
+    tjc_update_cached_text(g_tjc_cache.phone, sizeof(g_tjc_cache.phone), TJC_PHONE_OBJ, patient->phone);
+    tjc_update_cached_text(g_tjc_cache.remark, sizeof(g_tjc_cache.remark), TJC_REMARK_OBJ, patient->remark);
+}
+
+
+static uint8_t tjc_parse_age_text(const char *age)
+{
+    uint32_t value = 0;
+
+    if (age == NULL) {
+        return 0;
+    }
+    while ((*age >= '0') && (*age <= '9')) {
+        value = (value * 10U) + (uint32_t)(*age - '0');
+        if (value > 130U) {
+            return 0;
+        }
+        age++;
+    }
+    return (uint8_t)value;
 }
 
 void tjc_display_send_patient_info(const char *name, const char *record_no, const char *gender,
     const char *age, const char *phone, const char *note)
 {
-    tjc_display_send_text_value(TJC_PATIENT_NAME_OBJ, name);
-    tjc_display_send_text_value(TJC_PATIENT_RECORD_OBJ, record_no);
-    tjc_display_send_text_value(TJC_PATIENT_GENDER_OBJ, gender);
-    tjc_display_send_text_value(TJC_PATIENT_AGE_OBJ, age);
-    tjc_display_send_text_value(TJC_PATIENT_PHONE_OBJ, phone);
-    tjc_display_send_text_value(TJC_PATIENT_NOTE_OBJ, note);
+    tjc_display_patient_info_t patient = {
+        .name = name,
+        .case_no = record_no,
+        .gender = gender,
+        .age = tjc_parse_age_text(age),
+        .phone = phone,
+        .remark = note,
+    };
+
+    tjc_display_set_patient_info(&patient);
+}
+void tjc_display_update_vitals(const tjc_display_vitals_t *vitals)
+{
+    if (vitals == NULL) {
+        return;
+    }
+
+    if ((vitals->ecg_valid != 0) && (g_tjc_cache.ecg_hr != vitals->ecg.bpm)) {
+        g_tjc_cache.ecg_hr = vitals->ecg.bpm;
+        tjc_send_text_u16(TJC_ECG_HR_OBJ, vitals->ecg.bpm);
+    }
+    if ((vitals->ecg_valid != 0) && (g_tjc_cache.ecg_value != vitals->ecg.display_mv)) {
+        g_tjc_cache.ecg_value = vitals->ecg.display_mv;
+        tjc_send_text_i16(TJC_ECG_VALUE_OBJ, vitals->ecg.display_mv);
+    }
+    if (vitals->spo2.spo2_valid && g_tjc_cache.spo2_x10 != vitals->spo2.spo2_x10) {
+        g_tjc_cache.spo2_x10 = vitals->spo2.spo2_x10;
+        tjc_send_text_spo2_x10(TJC_SPO2_OBJ, vitals->spo2.spo2_x10);
+    }
+    if (vitals->spo2.hr_valid) {
+        tjc_display_send_bpm(vitals->spo2.hr_bpm);
+    }
+    if (vitals->bp_valid != 0) {
+        if (g_tjc_cache.systolic_bp != vitals->systolic_bp) {
+            g_tjc_cache.systolic_bp = vitals->systolic_bp;
+            tjc_send_text_u16(TJC_SYS_BP_OBJ, vitals->systolic_bp);
+        }
+        if (g_tjc_cache.diastolic_bp != vitals->diastolic_bp) {
+            g_tjc_cache.diastolic_bp = vitals->diastolic_bp;
+            tjc_send_text_u16(TJC_DIA_BP_OBJ, vitals->diastolic_bp);
+        }
+    }
+    if ((vitals->microcirculation_valid != 0) && (g_tjc_cache.microcirculation != vitals->microcirculation)) {
+        g_tjc_cache.microcirculation = vitals->microcirculation;
+        tjc_send_text_u16(TJC_MICROCIRC_OBJ, vitals->microcirculation);
+    }
+}
+
+void tjc_display_update_gt_health(const ecg_sle_gt_health_sample_t *sample)
+{
+    if (sample == NULL) {
+        return;
+    }
+
+    if (sample->spo2_valid) {
+        g_tjc_cache.spo2_x10 = (int32_t)sample->spo2 * 10;
+        tjc_send_text_u16(TJC_SPO2_OBJ, sample->spo2);
+    }
+    if (sample->heart_rate_valid) {
+        g_tjc_cache.spo2_hr = sample->heart_rate;
+        tjc_send_text_u16(TJC_BPM_OBJ, sample->heart_rate);
+    }
+    if (sample->bp_valid) {
+        g_tjc_cache.systolic_bp = sample->systolic_bp;
+        g_tjc_cache.diastolic_bp = sample->diastolic_bp;
+        tjc_send_text_u16(TJC_SYS_BP_OBJ, sample->systolic_bp);
+        tjc_send_text_u16(TJC_DIA_BP_OBJ, sample->diastolic_bp);
+    }
+    if (sample->microcirculation_valid) {
+        g_tjc_cache.microcirculation = sample->microcirculation;
+        tjc_send_text_u16(TJC_MICROCIRC_OBJ, sample->microcirculation);
+    }
+}
+
+void tjc_display_update_from_sle_sample(const ecg_sle_vital_sample_t *sample)
+{
+    tjc_display_vitals_t vitals = {0};
+
+    if (sample == NULL) {
+        return;
+    }
+
+    vitals.ecg = sample->ecg;
+    vitals.ecg_valid = 1;
+    vitals.spo2 = sample->spo2;
+    tjc_display_update_vitals(&vitals);
 }
 
 void tjc_display_send_test_pattern(void)

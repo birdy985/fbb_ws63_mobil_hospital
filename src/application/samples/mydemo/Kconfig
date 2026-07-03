@@ -82,6 +82,14 @@ config SAMPLE_SUPPORT_AD8232_ADC
     help
         This option means support AD8232 ECG ADC Sample.
 
+config SAMPLE_SUPPORT_GT_HEALTH
+    bool
+    prompt "Support GT health sensor Sample."
+    default n
+    depends on ENABLE_MYDEMO_SAMPLE
+    help
+        This option means support GT health sensor sample.
+
 config SAMPLE_SUPPORT_SPO2_SENSOR
     bool
     prompt "Support MAX30102 SpO2 Sensor Sample."
@@ -114,6 +122,8 @@ choice
         bool "Support SLE UART passthrough sample."
     config SAMPLE_SUPPORT_AD8232_SLE
         bool "Support AD8232 ECG SLE transport sample."
+    config SAMPLE_SUPPORT_GT_HEALTH_SLE
+        bool "Support GT health SLE transport sample."
 endchoice
 
 if SAMPLE_SUPPORT_SLE_UART
@@ -122,5 +132,9 @@ endif
 
 if SAMPLE_SUPPORT_AD8232_SLE
 osource "application/samples/mydemo/13_ad8232_sle/Kconfig"
+endif
+
+if SAMPLE_SUPPORT_GT_HEALTH_SLE
+osource "application/samples/mydemo/17_gt_health_sle/Kconfig"
 endif
 endif

@@ -10,8 +10,11 @@
 #define ECG_SLE_PACKET_VERSION_LEGACY 1
 #define ECG_SLE_PACKET_VERSION      2
 #define ECG_SLE_PACKET_TYPE_SAMPLE  1
+#define ECG_SLE_PACKET_TYPE_GT_HEALTH  2
 #define ECG_SLE_PACKET_ECG_PAYLOAD_LEN  24
 #define ECG_SLE_PACKET_PAYLOAD_LEN      40
+#define ECG_SLE_PACKET_GT_PAYLOAD_LEN   20
+#define ECG_SLE_PACKET_GT_LEN           28
 #define ECG_SLE_PACKET_LEGACY_LEN       32
 #define ECG_SLE_PACKET_LEN              48
 
@@ -43,6 +46,20 @@ typedef struct {
     ecg_sle_spo2_sample_t spo2;
 } ecg_sle_vital_sample_t;
 
+typedef struct {
+    uint32_t seq;
+    uint32_t timestamp_ms;
+    uint16_t heart_rate;
+    uint16_t spo2;
+    uint16_t microcirculation;
+    uint16_t systolic_bp;
+    uint16_t diastolic_bp;
+    bool heart_rate_valid;
+    bool spo2_valid;
+    bool microcirculation_valid;
+    bool bp_valid;
+} ecg_sle_gt_health_sample_t;
+
 typedef enum {
     ECG_SLE_PACKET_OK = 0,
     ECG_SLE_PACKET_ERR_NULL,
@@ -57,6 +74,11 @@ typedef enum {
 errcode_t ecg_sle_encode_vital_sample(const ecg_sle_vital_sample_t *sample, uint8_t *buffer, uint16_t buffer_len);
 ecg_sle_packet_status_t ecg_sle_decode_vital_sample(const uint8_t *buffer, uint16_t buffer_len,
     ecg_sle_vital_sample_t *sample);
+errcode_t ecg_sle_encode_gt_health_sample(const ecg_sle_gt_health_sample_t *sample, uint8_t *buffer,
+    uint16_t buffer_len);
+ecg_sle_packet_status_t ecg_sle_decode_gt_health_sample(const uint8_t *buffer, uint16_t buffer_len,
+    ecg_sle_gt_health_sample_t *sample);
+uint8_t ecg_sle_get_packet_type(const uint8_t *buffer, uint16_t buffer_len);
 errcode_t ecg_sle_encode_sample(const ecg_monitor_sample_t *sample, uint8_t *buffer, uint16_t buffer_len);
 ecg_sle_packet_status_t ecg_sle_decode_sample(const uint8_t *buffer, uint16_t buffer_len,
     ecg_monitor_sample_t *sample);

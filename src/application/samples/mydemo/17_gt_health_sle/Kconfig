@@ -1,0 +1,3 @@
+config SUPPORT_SLE_CENTRAL
+    bool
+    default y if SAMPLE_SUPPORT_GT_HEALTH_SLE
