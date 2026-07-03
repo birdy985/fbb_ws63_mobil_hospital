@@ -319,6 +319,10 @@ static void sle_connect_state_changed_cbk(uint16_t conn_id, const sle_addr_t *ad
         addr->addr[BT_INDEX_0], addr->addr[BT_INDEX_4]);
     if (conn_state == SLE_ACB_STATE_CONNECTED) {
         g_sle_conn_hdl = conn_id;
+        errcode_t ret = sle_start_announce(SLE_ADV_HANDLE_DEFAULT);
+        if (ret != ERRCODE_SLE_SUCCESS) {
+            sample_at_log_print("%s restart announce after connect failed:%x\r\n", SLE_UART_SERVER_LOG, ret);
+        }
 #ifdef CONFIG_SAMPLE_SUPPORT_LOW_LATENCY_TYPE
         sle_low_latency_tx_enable();
         osal_printk("%s sle_low_latency_tx_enable \r\n", SLE_UART_SERVER_LOG);

@@ -44,6 +44,18 @@ if(DEFINED CONFIG_SAMPLE_SUPPORT_AD8232_ADC)
     add_subdirectory_if_exist(9_ad8232_adc)
 endif()
 
+if(DEFINED CONFIG_SAMPLE_SUPPORT_LEGACY_AD8232_ADC)
+    add_subdirectory_if_exist(0_ad8232_adc)
+endif()
+
+if(DEFINED CONFIG_SAMPLE_SUPPORT_AD8232_ADC_VERIFY)
+    add_subdirectory_if_exist(10_ad8232_adc_verify)
+endif()
+
+if(DEFINED CONFIG_SAMPLE_SUPPORT_GT_HEALTH AND NOT DEFINED CONFIG_SAMPLE_SUPPORT_GT_HEALTH_SLE)
+    add_subdirectory_if_exist(16_gt_health)
+endif()
+
 if(DEFINED CONFIG_SAMPLE_SUPPORT_SPO2_SENSOR AND NOT DEFINED CONFIG_SAMPLE_SUPPORT_AD8232_SLE_CLIENT)
     add_subdirectory_if_exist(14_spo2_sensor)
 endif()
@@ -54,6 +66,8 @@ endif()
 
 if(DEFINED CONFIG_SAMPLE_SUPPORT_AD8232_SLE)
     add_subdirectory_if_exist(13_ad8232_sle)
+elseif(DEFINED CONFIG_SAMPLE_SUPPORT_GT_HEALTH_SLE)
+    add_subdirectory_if_exist(17_gt_health_sle)
 elseif(DEFINED CONFIG_SAMPLE_SUPPORT_SLE_UART OR DEFINED CONFIG_SAMPLE_SUPPORT_SLE)
     add_subdirectory_if_exist(12_sle)
 endif()
