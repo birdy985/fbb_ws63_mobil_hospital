@@ -148,6 +148,30 @@ static void ecg_sle_server_update_emqx(const ecg_sle_vital_sample_t *vital, uint
 #endif
 }
 
+static void ecg_sle_server_update_emqx_gt_health(const ecg_sle_gt_health_sample_t *gt, uint32_t rx_ms)
+{
+#ifdef CONFIG_SAMPLE_SUPPORT_EMQX_TELEMETRY
+    emqx_gt_health_telemetry_t sample = {
+        .seq = gt->seq,
+        .timestamp_ms = gt->timestamp_ms == 0 ? rx_ms : gt->timestamp_ms,
+        .heart_rate = gt->heart_rate,
+        .spo2 = gt->spo2,
+        .microcirculation = gt->microcirculation,
+        .systolic_bp = gt->systolic_bp,
+        .diastolic_bp = gt->diastolic_bp,
+        .heart_rate_valid = gt->heart_rate_valid,
+        .spo2_valid = gt->spo2_valid,
+        .microcirculation_valid = gt->microcirculation_valid,
+        .bp_valid = gt->bp_valid,
+        .sample_valid = true,
+    };
+    emqx_telemetry_update_gt_health(&sample);
+#else
+    unused(gt);
+    unused(rx_ms);
+#endif
+}
+
 static void ecg_sle_server_handle_gt_health_msg(const ecg_sle_rx_msg_t *msg, uint32_t rx_ms)
 {
     ecg_sle_gt_health_sample_t gt = {0};
@@ -180,6 +204,7 @@ static void ecg_sle_server_handle_gt_health_msg(const ecg_sle_rx_msg_t *msg, uin
     }
 
     tjc_display_update_gt_health(&gt);
+    ecg_sle_server_update_emqx_gt_health(&gt, rx_ms);
     osal_printk("[SLE_RX_GT] seq=%lu sensor_ms=%lu rx_ms=%lu hr=%u spo2=%u micro=%u sys=%u dia=%u\r\n",
         (unsigned long)gt.seq,
         (unsigned long)gt.timestamp_ms,

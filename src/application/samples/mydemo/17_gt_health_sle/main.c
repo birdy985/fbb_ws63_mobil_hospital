@@ -17,12 +17,31 @@
 #define GT_HEALTH_SLE_TASK_STACK_SIZE       0x2000
 #define GT_HEALTH_SLE_READ_TIMEOUT_MS       1000
 #define GT_HEALTH_SLE_READ_FAIL_DELAY_MS    200
+#define GT_HEALTH_SLE_DEMO_REFRESH_MS       2000
 #define GT_HEALTH_SLE_STATS_INTERVAL_MS     2000
 #define GT_HEALTH_SLE_BP_MIN_SYS            60
 #define GT_HEALTH_SLE_BP_MAX_SYS            250
 #define GT_HEALTH_SLE_BP_MIN_DIA            40
 #define GT_HEALTH_SLE_BP_MAX_DIA            180
 #define GT_HEALTH_SLE_LOG                   "[gt health sle client]"
+#define GT_HEALTH_SLE_ARRAY_SIZE(array)     (sizeof(array) / sizeof((array)[0]))
+
+typedef struct {
+    uint16_t microcirculation;
+    uint16_t systolic_bp;
+    uint16_t diastolic_bp;
+} gt_health_sle_demo_vitals_t;
+
+static const gt_health_sle_demo_vitals_t g_gt_health_sle_demo_vitals[] = {
+    {72, 118, 76},
+    {81, 124, 82},
+    {68, 112, 73},
+    {87, 126, 84},
+    {75, 116, 78},
+    {90, 122, 80},
+    {70, 114, 72},
+    {84, 120, 79},
+};
 
 static uint8_t g_gt_health_sle_tx_buf[ECG_SLE_PACKET_GT_LEN];
 static uint32_t g_gt_health_sle_seq;
@@ -56,6 +75,22 @@ static bool gt_health_sle_is_valid_bp(uint8_t systolic_bp, uint8_t diastolic_bp)
     return systolic_bp > diastolic_bp;
 }
 
+static void gt_health_sle_apply_demo_vitals(ecg_sle_gt_health_sample_t *sample)
+{
+    const gt_health_sle_demo_vitals_t *demo = NULL;
+
+    if (sample == NULL) {
+        return;
+    }
+
+    demo = &g_gt_health_sle_demo_vitals[sample->seq % GT_HEALTH_SLE_ARRAY_SIZE(g_gt_health_sle_demo_vitals)];
+    sample->microcirculation = demo->microcirculation;
+    sample->microcirculation_valid = true;
+    sample->systolic_bp = demo->systolic_bp;
+    sample->diastolic_bp = demo->diastolic_bp;
+    sample->bp_valid = true;
+}
+
 static void gt_health_sle_fill_sample(const gt_health_data_t *data, ecg_sle_gt_health_sample_t *sample)
 {
     if ((data == NULL) || (sample == NULL)) {
@@ -73,6 +108,7 @@ static void gt_health_sle_fill_sample(const gt_health_data_t *data, ecg_sle_gt_h
     sample->systolic_bp = data->systolic_bp;
     sample->diastolic_bp = data->diastolic_bp;
     sample->bp_valid = gt_health_sle_is_valid_bp(data->systolic_bp, data->diastolic_bp);
+    gt_health_sle_apply_demo_vitals(sample);
 }
 
 static errcode_t gt_health_sle_send_sample(const ecg_sle_gt_health_sample_t *sample)
@@ -175,6 +211,7 @@ static void *gt_health_sle_task(const char *arg)
                 (unsigned int)get_g_sle_uart_send_param()->handle);
             last_stats_ms = now_ms;
         }
+        osal_msleep(GT_HEALTH_SLE_DEMO_REFRESH_MS);
     }
 
     return NULL;

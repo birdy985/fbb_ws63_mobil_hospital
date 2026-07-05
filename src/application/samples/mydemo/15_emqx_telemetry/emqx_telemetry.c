@@ -46,6 +46,21 @@ void emqx_telemetry_update_spo2(const emqx_spo2_telemetry_t *sample)
     }
 }
 
+void emqx_telemetry_update_gt_health(const emqx_gt_health_telemetry_t *sample)
+{
+    if (sample == NULL) {
+        return;
+    }
+    emqx_telemetry_ensure_lock();
+    if (g_emqx_telemetry_lock_ready != 0) {
+        (void)osal_mutex_lock(&g_emqx_telemetry_lock);
+    }
+    g_emqx_telemetry_snapshot.gt_health = *sample;
+    if (g_emqx_telemetry_lock_ready != 0) {
+        osal_mutex_unlock(&g_emqx_telemetry_lock);
+    }
+}
+
 void emqx_telemetry_get_snapshot(emqx_telemetry_snapshot_t *snapshot)
 {
     if (snapshot == NULL) {

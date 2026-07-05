@@ -300,49 +300,93 @@ static int emqx_mqtt_connect(void)
     return MQTTCLIENT_SUCCESS;
 }
 
+static uint32_t emqx_latest_ts(const emqx_telemetry_snapshot_t *snapshot)
+{
+    uint32_t ts = snapshot->ecg.timestamp_ms;
+
+    if (snapshot->spo2.timestamp_ms > ts) {
+        ts = snapshot->spo2.timestamp_ms;
+    }
+    if (snapshot->gt_health.timestamp_ms > ts) {
+        ts = snapshot->gt_health.timestamp_ms;
+    }
+    return ts;
+}
+
 static int emqx_build_payload(char *buffer, size_t buffer_len)
 {
     emqx_telemetry_snapshot_t snapshot = {0};
+    int32_t spo2_x10 = 0;
     int spo2_int = 0;
     int spo2_frac = 0;
     uint32_t heart_rate = 0;
-    const char *quality = "--";
+    uint16_t microcirculation = 0;
+    uint16_t systolic_bp = 0;
+    uint16_t diastolic_bp = 0;
+    bool heart_rate_valid = false;
+    bool spo2_valid = false;
+    bool microcirculation_valid = false;
+    bool bp_valid = false;
 
     emqx_telemetry_get_snapshot(&snapshot);
-    if (snapshot.spo2.spo2_valid) {
-        spo2_int = snapshot.spo2.spo2_x10 / 10;
-        spo2_frac = snapshot.spo2.spo2_x10 % 10;
-    }
-    if (snapshot.ecg.ecg_valid && (snapshot.ecg.heart_rate > 0)) {
+    if (snapshot.gt_health.sample_valid && snapshot.gt_health.heart_rate_valid) {
+        heart_rate = snapshot.gt_health.heart_rate;
+        heart_rate_valid = true;
+    } else if (snapshot.ecg.ecg_valid && (snapshot.ecg.heart_rate > 0)) {
         heart_rate = snapshot.ecg.heart_rate;
+        heart_rate_valid = true;
     } else if (snapshot.spo2.hr_valid) {
         heart_rate = snapshot.spo2.hr_bpm;
+        heart_rate_valid = true;
     }
-    if (snapshot.spo2.quality != NULL) {
-        quality = snapshot.spo2.quality;
+
+    if (snapshot.gt_health.sample_valid && snapshot.gt_health.spo2_valid) {
+        spo2_x10 = (int32_t)snapshot.gt_health.spo2 * 10;
+        spo2_valid = true;
+    } else if (snapshot.spo2.spo2_valid) {
+        spo2_x10 = snapshot.spo2.spo2_x10;
+        spo2_valid = true;
+    }
+    if (spo2_valid) {
+        spo2_int = spo2_x10 / 10;
+        spo2_frac = spo2_x10 % 10;
+    }
+
+    if (snapshot.gt_health.sample_valid && snapshot.gt_health.microcirculation_valid) {
+        microcirculation = snapshot.gt_health.microcirculation;
+        microcirculation_valid = true;
+    }
+    if (snapshot.gt_health.sample_valid && snapshot.gt_health.bp_valid) {
+        systolic_bp = snapshot.gt_health.systolic_bp;
+        diastolic_bp = snapshot.gt_health.diastolic_bp;
+        bp_valid = true;
     }
 
     return snprintf_s(buffer, buffer_len, buffer_len - 1,
-        "{\"deviceId\":\"bed01\",\"seq\":%lu,\"dispplay_mv\":%d,\"display_mv\":%d,"
-        "\"heartRate\":%lu,\"spo2\":%d.%d,\"spo2_x10\":%ld,\"quality\":\"%s\","
-        "\"ecgValid\":%s,\"spo2Valid\":%s,\"ts\":%lu}",
+        "{\"deviceId\":\"bed01\",\"seq\":%lu,\"heartRate\":%lu,\"heartRateValid\":%s,"
+        "\"spo2\":%d.%d,\"spo2_x10\":%ld,\"spo2Valid\":%s,"
+        "\"microcirculation\":%u,\"microcirculationValid\":%s,"
+        "\"systolicBp\":%u,\"diastolicBp\":%u,\"bpValid\":%s,"
+        "\"gtHealthValid\":%s,\"ts\":%lu}",
         (unsigned long)g_emqx_publish_seq++,
-        (int)snapshot.ecg.display_mv,
-        (int)snapshot.ecg.display_mv,
         (unsigned long)heart_rate,
+        heart_rate_valid ? "true" : "false",
         spo2_int,
         spo2_frac < 0 ? -spo2_frac : spo2_frac,
-        (long)snapshot.spo2.spo2_x10,
-        quality,
-        snapshot.ecg.ecg_valid ? "true" : "false",
-        snapshot.spo2.spo2_valid ? "true" : "false",
-        (unsigned long)(snapshot.ecg.timestamp_ms > snapshot.spo2.timestamp_ms ?
-            snapshot.ecg.timestamp_ms : snapshot.spo2.timestamp_ms));
+        (long)spo2_x10,
+        spo2_valid ? "true" : "false",
+        (unsigned int)microcirculation,
+        microcirculation_valid ? "true" : "false",
+        (unsigned int)systolic_bp,
+        (unsigned int)diastolic_bp,
+        bp_valid ? "true" : "false",
+        snapshot.gt_health.sample_valid ? "true" : "false",
+        (unsigned long)emqx_latest_ts(&snapshot));
 }
 
 static int emqx_publish_once(void)
 {
-    char payload[384];
+    char payload[512];
     int len;
     int ret;
     MQTTClient_message pubmsg = MQTTClient_message_initializer;
